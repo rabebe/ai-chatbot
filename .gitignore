@@ -1,0 +1,28 @@
+# Virtual Environment
+venv/
+.env
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Logs
+*.log
+logs/
+
+# AI models
+*.h5
+*.pt
+*.ckpt
+*.model
+*.onnx
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
