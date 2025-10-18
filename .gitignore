@@ -20,6 +20,12 @@ logs/
 *.model
 *.onnx
 
+# ChromaDB data
+data/chromadb/
+data/test_chromadb/
+*.sqlite3
+*.bin
+
 # IDE / Editor
 .vscode/
 .idea/

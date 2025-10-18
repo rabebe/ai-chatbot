@@ -53,10 +53,11 @@ class RAGSummarizer:
         """Get LLM based on type."""
         if model_type == "google":
             return ChatGoogleGenerativeAI(
-                model="gemini-pro",
+                model="models/gemini-2.0-flash-001",
                 temperature=temperature,
                 max_tokens=max_tokens,
-                google_api_key=os.getenv("GOOGLE_API_KEY")
+                google_api_key=os.getenv("GOOGLE_API_KEY"),
+                convert_system_message_to_human=True
             )
         else:
             raise ValueError(f"Unsupported LLM model: {model_type}. Only 'google' is supported.")
