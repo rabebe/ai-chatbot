@@ -85,6 +85,7 @@ jupyterlab_pygments==0.3.0
 jupyterlab_server==2.27.3
 langchain==0.3.27
 langchain-core==0.3.77
+langchain-community==0.3.7
 langchain-google-genai==2.1.12
 langchain-text-splitters==0.3.11
 langsmith==0.4.31
@@ -106,7 +107,6 @@ nest-asyncio==1.6.0
 notebook==7.4.7
 notebook_shim==0.2.4
 numpy==2.3.3
-openai==2.1.0
 optuna==4.5.0
 orjson==3.11.3
 overrides==7.7.0
@@ -183,3 +183,5 @@ xxhash==3.6.0
 yarl==1.22.0
 zipp==3.23.0
 zstandard==0.25.0
+chromadb==0.5.15
+langchain-chroma==0.1.4
