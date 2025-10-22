@@ -8,13 +8,13 @@ from langchain_core.prompts import ChatPromptTemplate
 def get_summarization_prompt() -> ChatPromptTemplate:
     """
     Get the prompt template for summarization tasks.
-    
+
     Returns:
         ChatPromptTemplate for summarization
     """
     template = """You are a helpful AI assistant that creates accurate and concise summaries based on provided context.
 
-Your task is to summarize information related to the user's query using ONLY the context provided below. 
+Your task is to summarize information related to the user's query using ONLY the context provided below.
 
 Guidelines:
 - Use only the information from the provided context
@@ -37,7 +37,7 @@ Summary:"""
 def get_qa_prompt() -> ChatPromptTemplate:
     """
     Get the prompt template for question answering tasks.
-    
+
     Returns:
         ChatPromptTemplate for Q&A
     """
@@ -66,7 +66,7 @@ Answer:"""
 def get_detailed_summarization_prompt() -> ChatPromptTemplate:
     """
     Get a more detailed prompt template for comprehensive summarization.
-    
+
     Returns:
         ChatPromptTemplate for detailed summarization
     """
@@ -99,7 +99,7 @@ Detailed Summary:"""
 def get_bullet_point_prompt() -> ChatPromptTemplate:
     """
     Get a prompt template for bullet-point style summaries.
-    
+
     Returns:
         ChatPromptTemplate for bullet-point summaries
     """
@@ -129,7 +129,7 @@ Summary (bullet points):"""
 def get_faq_prompt() -> ChatPromptTemplate:
     """
     Get a prompt template specifically for FAQ-style responses.
-    
+
     Returns:
         ChatPromptTemplate for FAQ responses
     """
