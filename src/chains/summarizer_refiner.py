@@ -46,7 +46,7 @@ Critique:
 {critique}
 
 Current Summary Draft:
-{current_summary}
+{summary_draft}
 
 ---
 Revised Summary:"""
@@ -71,7 +71,7 @@ Document Chunks:
 {document_chunks}
 
 Current Summary Draft to be Judged:
-{current_summary}
+{summary_draft}
 
 ---
 Judge Result (JSON format ONLY):
@@ -111,12 +111,12 @@ def summarizer_node(state: AgentState) -> Dict[str, Any]:
         logger.info("Initial summary generated.")
 
         # Update the state
-        return {"current_summary": summary}
+        return {"summary_draft": summary}
     except Exception as e:
         logger.error(f"Summarizer failed: {e}")
         # In case of failure, prevent infinite loop and use error message as summary
         return {
-            "current_summary": f"ERROR: Summarizer failed to generate summary. {e}",
+            "summary_draft": f"ERROR: Summarizer failed to generate summary. {e}",
             "refinement_count": state.get("refinement_count", 0) + 1,
         }
 
@@ -128,7 +128,7 @@ def refinement_node(state: AgentState) -> Dict[str, Any]:
     logger.info("---EXECUTING REFINEMENT NODE---")
 
     # Extract needed state variables
-    current_summary = state["current_summary"]
+    summary_draft = state["summary_draft"]
     judge_result = state["judge_result"]
     critique = (
         judge_result.critique if judge_result else "No specific critique provided."
@@ -156,7 +156,7 @@ def refinement_node(state: AgentState) -> Dict[str, Any]:
             SystemMessage(content="You are an expert editor."),
             HumanMessage(
                 content=REFINEMENT_PROMPT.format(
-                    critique=critique, current_summary=current_summary
+                    critique=critique, summary_draft=summary_draft
                 )
             ),
         ]
@@ -172,7 +172,7 @@ def refinement_node(state: AgentState) -> Dict[str, Any]:
 
         # Update the state
         return {
-            "current_summary": revised_summary,
+            "summary_draft": revised_summary,
             "refinement_count": refinement_count,
         }
     except Exception as e:
@@ -192,7 +192,7 @@ def judge_node(state: AgentState) -> Dict[str, Any]:
 
     # Extract needed state variables
     document_chunks = state["document_chunks"]
-    current_summary = state["current_summary"]
+    summary_draft = state["summary_draft"]
 
     # Combine chunks into a single string for the judge
     document_text = "\n\n---\n\n".join(document_chunks)
@@ -205,7 +205,7 @@ def judge_node(state: AgentState) -> Dict[str, Any]:
             ),
             HumanMessage(
                 content=JUDGE_PROMPT.format(
-                    document_chunks=document_text, current_summary=current_summary
+                    document_chunks=document_text, summary_draft=summary_draft
                 )
             ),
         ]

@@ -15,7 +15,7 @@ def initial_state_fixture() -> AgentState:
     """Fixture for a standard initial state."""
     return {
         "document": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.",
-        "current_summary": "",
+        "summary_draft": "",
         "document_chunks": [
             "Chunk 1: The quick brown fox jumps over the lazy dog. It is very fast.",
             "Chunk 2: The brown fox then runs to the river. It lives in the woods.",
@@ -39,7 +39,7 @@ mock_judge_result_pass = JudgeResult(
 
 
 def test_summarizer_node_returns_summary(initial_state_fixture):
-    """Tests that the summarizer node executes and updates the 'current_summary' key."""
+    """Tests that the summarizer node executes and updates the 'summary_draft' key."""
 
     # Mock the LLM to return a predictable string to testing purposes
     # mock_chain_result = "This is a generated initial summary draft."
@@ -51,9 +51,9 @@ def test_summarizer_node_returns_summary(initial_state_fixture):
     new_state: Dict[str, Any] = summarizer_node(initial_state_fixture)
 
     # Assert that the new state contains the expected key
-    assert "current_summary" in new_state
-    assert isinstance(new_state["current_summary"], str)
-    assert len(new_state["current_summary"]) > 0
+    assert "summary_draft" in new_state
+    assert isinstance(new_state["summary_draft"], str)
+    assert len(new_state["summary_draft"]) > 0
 
 
 def test_judge_node_updates_judge_result(initial_state_fixture):
@@ -81,7 +81,7 @@ def test_decide_to_continue_refine(initial_state_fixture):
 def test_refinement_node_increments_count(initial_state_fixture):
     """Tests that the refinement node increments the refinement count."""
 
-    initial_state_fixture["current_summary"] = "Old summary."
+    initial_state_fixture["summary_draft"] = "Old summary."
     initial_state_fixture["judge_result"] = mock_judge_result_refine
 
     # Simulate first refinement
