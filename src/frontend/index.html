@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Self-Correcting Summarizer Agent</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font family -->
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7fafc; }
+        .card { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+    </style>
+</head>
+<body class="p-4 sm:p-8 min-h-screen flex items-center justify-center">
+
+    <div class="w-full max-w-4xl space-y-8">
+        <header class="text-center">
+            <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-800">
+                Self-Correcting Summarization Agent
+            </h1>
+            <p class="mt-2 text-lg text-gray-500">
+                Critique-and-refine LLM workflow for guaranteed quality.
+            </p>
+        </header>
+
+        <!-- Main Input Card -->
+        <div class="card bg-white p-6 sm:p-8 rounded-xl border border-gray-200">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">1. Input Document</h2>
+            <textarea
+                id="documentInput"
+                class="w-full h-48 p-4 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
+                placeholder="Paste your long document here. The agent will summarize it and loop through refinement steps until quality criteria are met."
+            >The principle of recursion involves a function calling itself, either directly or indirectly. In programming, this technique is typically used to solve problems that can be broken down into smaller, self-similar subproblems. For example, calculating the factorial of a number (N!) is a common recursive application, as N! is defined as N multiplied by the factorial of N-1. Every recursive function must have a base case—a condition that stops the recursion—to prevent an infinite loop, which is a critical design element.
+            </textarea>
+
+            <div class="mt-6 flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-3 sm:space-y-0">
+                <div id="maxStepsDisplay" class="text-sm font-medium text-gray-600">
+                    Max Refinement Steps: <span id="maxStepsValue" class="font-bold text-gray-800">3</span>
+                </div>
+                <button
+                    id="summarizeButton"
+                    onclick="runSummarizer()"
+                    class="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white font-bold rounded-full hover:bg-blue-700 transition duration-150 shadow-lg active:scale-[0.98] disabled:bg-gray-400"
+                >
+                    Generate & Refine Summary
+                </button>
+            </div>
+            <p id="loadingMessage" class="mt-4 text-center text-blue-600 font-semibold hidden">
+                Running agent... (This may take several seconds for the critique loop to complete)
+            </p>
+        </div>
+
+        <!-- Output Card -->
+        <div class="card bg-white p-6 sm:p-8 rounded-xl border border-gray-200">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700">2. Final Result & Quality Metrics</h2>
+
+            <!-- Summary Output -->
+            <div class="mb-6">
+                <h3 class="text-lg font-bold text-gray-800 mb-2 border-b pb-1">Final Summary</h3>
+                <p id="finalSummary" class="text-gray-700 italic bg-gray-50 p-3 rounded-lg border border-gray-100 min-h-[5rem]">
+                    Ready to summarize your document...
+                </p>
+            </div>
+
+            <!-- Metrics and Feedback -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="col-span-1">
+                    <h3 class="text-sm font-bold text-gray-800 mb-1">Refinement Steps</h3>
+                    <p id="stepsTaken" class="text-2xl font-extrabold text-blue-600">0</p>
+                    <p class="text-xs text-gray-500">Loops executed (0 is initial draft)</p>
+                </div>
+                <div class="col-span-1">
+                    <h3 class="text-sm font-bold text-gray-800 mb-1">Judge Score (1-10)</h3>
+                    <p id="finalScore" class="text-2xl font-extrabold text-green-600">N/A</p>
+                    <p class="text-xs text-gray-500">Final quality score</p>
+                </div>
+                <div class="md:col-span-1">
+                    <h3 class="text-sm font-bold text-gray-800 mb-1">Final Critique</h3>
+                    <p id="finalCritique" class="text-xs text-gray-600 italic">No critique received yet.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- JavaScript Logic -->
+        <script>
+            // Use the Flask API endpoint running locally (or deployed)
+            const API_URL = 'http://localhost:5001/summarize';
+
+            const button = document.getElementById('summarizeButton');
+            const inputArea = document.getElementById('documentInput');
+            const loadingMessage = document.getElementById('loadingMessage');
+            const finalSummary = document.getElementById('finalSummary');
+            const stepsTaken = document.getElementById('stepsTaken');
+            const finalScore = document.getElementById('finalScore');
+            const finalCritique = document.getElementById('finalCritique');
+            const maxStepsValue = document.getElementById('maxStepsValue');
+
+            // Hardcode max steps (can be made interactive later)
+            const MAX_STEPS = 3;
+
+            // Initialize UI on load
+            document.addEventListener('DOMContentLoaded', () => {
+                maxStepsValue.textContent = MAX_STEPS;
+                finalSummary.textContent = "Ready to summarize your document...";
+            });
+
+            function updateUI(status) {
+                if (status === 'loading') {
+                    button.disabled = true;
+                    button.textContent = 'Agent Running...';
+                    loadingMessage.classList.remove('hidden');
+                    finalSummary.textContent = "Processing and self-correcting...";
+                    finalScore.textContent = '...';
+                    finalCritique.textContent = 'The Judge is actively reviewing the draft.';
+                    stepsTaken.textContent = '0';
+                    finalScore.classList.remove('text-green-600', 'text-red-600', 'text-yellow-600');
+                    finalScore.classList.add('text-gray-500');
+                } else if (status === 'ready') {
+                    button.disabled = false;
+                    button.textContent = 'Generate & Refine Summary';
+                    loadingMessage.classList.add('hidden');
+                } else if (status === 'error') {
+                    finalSummary.textContent = "Error: Failed to connect to the API or process the request.";
+                    finalCritique.textContent = "Check your Flask server and API console for errors.";
+                    finalScore.textContent = 'ERR';
+                    finalScore.classList.remove('text-green-600', 'text-gray-500');
+                    finalScore.classList.add('text-red-600');
+                    updateUI('ready');
+                }
+            }
+
+            async function runSummarizer() {
+                const documentText = inputArea.value.trim();
+                if (!documentText) {
+                    alert("Please paste a document to summarize.");
+                    return;
+                }
+
+                updateUI('loading');
+
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            document: documentText,
+                            max_refinement_steps: MAX_STEPS
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+
+                    // Update output fields
+                    finalSummary.textContent = data.final_summary || 'N/A';
+                    stepsTaken.textContent = data.refinement_steps_taken.toString();
+
+                    const judgeResult = data.final_judge_result || {};
+                    const score = judgeResult.score || 'N/A';
+                    finalScore.textContent = score;
+                    finalCritique.textContent = judgeResult.critique || 'No final critique available.';
+
+                    // Apply color based on score
+                    finalScore.classList.remove('text-gray-500');
+                    if (score >= 8) {
+                        finalScore.classList.add('text-green-600');
+                    } else if (score >= 5) {
+                        finalScore.classList.add('text-yellow-600');
+                    } else {
+                        finalScore.classList.add('text-red-600');
+                    }
+
+                } catch (error) {
+                    console.error("Fetch error:", error);
+                    updateUI('error');
+                } finally {
+                    updateUI('ready');
+                }
+            }
+        </script>
+    </div>
+
+</body>
+</html>
