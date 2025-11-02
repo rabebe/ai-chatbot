@@ -9,7 +9,7 @@ class JudgeResult(BaseModel):
     This schema is used to ensure LLM output is predictable
     """
 
-    criqtique: str = Field(
+    critique: str = Field(
         description="Detailed critique of the current summary and specific improvement suggestions."
     )
     score: int = Field(

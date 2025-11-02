@@ -1,5 +1,5 @@
 """
-Utility functions for the RAG summarizer.
+Utility functions for file system I/O, path management, and logging
 """
 
 import logging
@@ -29,21 +29,6 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> No
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=handlers,
     )
-
-
-def check_api_keys() -> dict:
-    """
-    Check which API keys are available.
-
-    Returns:
-        Dictionary with available API keys
-    """
-    # Import here to avoid circular imports
-    from check_google_api import check_google_api_key
-
-    keys = {"google": check_google_api_key()}
-
-    return keys
 
 
 def get_project_root() -> Path:
