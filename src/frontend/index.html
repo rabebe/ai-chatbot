@@ -10,6 +10,54 @@
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f7fafc; }
         .card { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 1.5rem;
+            height: 1.5rem;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Custom styles for the info icon and tooltip */
+        .info-icon {
+            cursor: pointer;
+            color: #6b7280; /* Gray-500 */
+        }
+        .tooltip-text {
+            visibility: hidden;
+            width: 700px;
+            background-color: #374151; /* Gray-700 */
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 5px 10px;
+            position: absolute;
+            z-index: 10;
+            bottom: 125%; /* Position above the icon */
+            left: 50%;
+            margin-left: -180px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 0.75rem;
+        }
+        .info-container:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+        .tooltip-text::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #374151 transparent transparent transparent;
+        }
     </style>
 </head>
 <body class="p-4 sm:p-8 min-h-screen flex items-center justify-center">
@@ -20,34 +68,64 @@
                 Self-Correcting Summarization Agent
             </h1>
             <p class="mt-2 text-lg text-gray-500">
-                Critique-and-refine LLM workflow for guaranteed quality.
+                Critique-and-refine LLM workflow.
             </p>
         </header>
 
         <!-- Main Input Card -->
         <div class="card bg-white p-6 sm:p-8 rounded-xl border border-gray-200">
             <h2 class="text-xl font-semibold mb-4 text-gray-700">1. Input Document</h2>
+            <!-- Updated text area by removing default text, added maxlength, refined placeholder-->
             <textarea
                 id="documentInput"
                 class="w-full h-48 p-4 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
                 placeholder="Paste your long document here. The agent will summarize it and loop through refinement steps until quality criteria are met."
-            >The principle of recursion involves a function calling itself, either directly or indirectly. In programming, this technique is typically used to solve problems that can be broken down into smaller, self-similar subproblems. For example, calculating the factorial of a number (N!) is a common recursive application, as N! is defined as N multiplied by the factorial of N-1. Every recursive function must have a base case—a condition that stops the recursion—to prevent an infinite loop, which is a critical design element.
-            </textarea>
+            ></textarea>
+            <!-- Character Counter -->
+            <div class="text-right text-sm text-gray-500 mt-1">
+                <span id="charCount" class="font-medium">0</span> / 25,000 characters
+            </div>
 
-            <div class="mt-6 flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-3 sm:space-y-0">
-                <div id="maxStepsDisplay" class="text-sm font-medium text-gray-600">
-                    Max Refinement Steps: <span id="maxStepsValue" class="font-bold text-gray-800">3</span>
+            <!-- Layout adjusted for better spacing on mobile and desktop-->
+            <div class="mt-6 flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-4 sm:space-x-6">
+                <!-- Max Steps Input with Tooltip for clarity-->
+                <div class="flex items-center space-x-3">
+                    <label for="maxStepsInput" class="text-sm font-medium text-gray-600 whitespace-nowrap flex items-center">
+                    Max Refinement Steps:
+                        <span class="info-container relative ml-2">
+                            <!-- SVG Info Icon -->
+                            <svg class="info-icon w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.75.75 0 01.753.75v3a.75.75 0 01-1.5 0v-.256a.75.75 0 00-.75-.75h-.257a.75.75 0 00-.75.75v.256a.75.75 0 01-1.5 0v-3a.75.75 0 01.75-.75h.253a.75.75 0 00.75-.75V9z" clip-rule="evenodd" />
+                            </svg>
+                            <!-- Tooltip Text -->
+                            <span class="tooltip-text">
+                                The maximum number of times the agent will loop (Summarize, Critique, Refine) before stopping. Set to 0 for initial draft only.
+                            </span>
+                        </span>
+                    </label>
+                    <input
+                        type="number"
+                        id="maxStepsInput"
+                        value="3"
+                        min="0"
+                        max="5"
+                        class="w-16 p-2 border border-gray-300 rounded-lg text-center font-bold text-gray-800 focus:ring-blue-500 focus:border-blue-500"
+                    />
                 </div>
+
                 <button
                     id="summarizeButton"
                     onclick="runSummarizer()"
                     class="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white font-bold rounded-full hover:bg-blue-700 transition duration-150 shadow-lg active:scale-[0.98] disabled:bg-gray-400"
                 >
-                    Generate & Refine Summary
+                    <span id="buttonText">Generate & Refine Summary</span>
+                    <div id="buttonSpinner" class="spinner ml-3 hidden"></div>
                 </button>
             </div>
-            <p id="loadingMessage" class="mt-4 text-center text-blue-600 font-semibold hidden">
-                Running agent... (This may take several seconds for the critique loop to complete)
+
+            <!-- Error Alert -->
+            <p id="errorMessage" class="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg hidden font-medium" role="alert">
+                <span class="font-bold">API Error:</span> <span id="errorDetails"></span>
             </p>
         </div>
 
@@ -80,64 +158,154 @@
                     <p id="finalCritique" class="text-xs text-gray-600 italic">No critique received yet.</p>
                 </div>
             </div>
+
+                        <!-- Process Log (New for clarity) -->
+            <div class="mt-8 pt-6 border-t border-gray-200">
+                <h3 class="text-lg font-bold text-gray-800 mb-2">3. Agent Process Log</h3>
+                <div id="processLog" class="bg-gray-800 text-gray-200 text-sm p-4 rounded-lg font-mono overflow-auto h-32">
+                    [System] Ready. Enter document and click 'Generate & Refine Summary'.
+                </div>
+            </div>
         </div>
+
 
         <!-- JavaScript Logic -->
         <script>
-            // Use the Flask API endpoint running locally (or deployed)
+            // Use the Flask API endpoint running locally
             const API_URL = 'http://localhost:5001/summarize';
+            const LOG_MAX_LINES = 10;
 
-            const button = document.getElementById('summarizeButton');
-            const inputArea = document.getElementById('documentInput');
-            const loadingMessage = document.getElementById('loadingMessage');
-            const finalSummary = document.getElementById('finalSummary');
-            const stepsTaken = document.getElementById('stepsTaken');
-            const finalScore = document.getElementById('finalScore');
-            const finalCritique = document.getElementById('finalCritique');
-            const maxStepsValue = document.getElementById('maxStepsValue');
+            const elements = {
+                button: document.getElementById('summarizeButton'),
+                buttonText: document.getElementById('buttonText'),
+                buttonSpinner: document.getElementById('buttonSpinner'),
+                inputArea: document.getElementById('documentInput'),
+                maxStepsInput: document.getElementById('maxStepsInput'),
+                errorMessage: document.getElementById('errorMessage'),
+                errorDetails: document.getElementById('errorDetails'),
+                finalSummary: document.getElementById('finalSummary'),
+                stepsTaken: document.getElementById('stepsTaken'),
+                finalScore: document.getElementById('finalScore'),
+                finalCritique: document.getElementById('finalCritique'),
+                processLog: document.getElementById('processLog'), // NEW
+                charCount: document.getElementById('charCount'),
+            }
+            // --- Character Counter Logic ---
+            function updateCharCount() {
+                const input = elements.inputArea.value.length;
+                const max = elements.inputArea.maxLength;
 
-            // Hardcode max steps (can be made interactive later)
-            const MAX_STEPS = 3;
+                elements.charCount.textContent = input.toLocaleString();
 
-            // Initialize UI on load
-            document.addEventListener('DOMContentLoaded', () => {
-                maxStepsValue.textContent = MAX_STEPS;
-                finalSummary.textContent = "Ready to summarize your document...";
-            });
+                // Simple visual feedback for user
+                if (input > max * 0.9) { // Highlight red when near the limit (90%)
+                    elements.charCount.classList.add('text-red-500');
+                    elements.charCount.classList.remove('text-blue-500');
+                } else if (input > max * 0.5) { // Highlight blue when over half
+                    elements.charCount.classList.remove('text-red-500');
+                    elements.charCount.classList.add('text-blue-500');
+                } else {
+                    elements.charCount.classList.remove('text-red-500', 'text-blue-500');
+                }
+            }
 
-            function updateUI(status) {
+            // Set up the listener immediately
+            elements.inputArea.addEventListener('input', updateCharCount);
+
+            // Call once on load to initialize the count
+            window.onload = updateCharCount;
+
+            // --- Logging and UI Update Functions ---
+            function addToLog(message, type = 'INFO') {
+                const log = elements.processLog;
+
+                // Prepend new message with a timestamp
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                // Create a new line element with type-specific styling
+                const newLine = document.createElement('div');
+                newLine.className = `whitespace-pre-wrap`;
+
+                let textColor = 'text-gray-200';
+                if (type === 'ERROR') textColor = 'text-red-400 font-bold';
+                else if (type === 'SUCCESS') textColor = 'text-green-400 font-bold';
+                else if (type === 'CRITIQUE') textColor = 'text-yellow-400 italic';
+
+                newLine.innerHTML = `<span class="text-gray-500">[${timeStr}]</span> <span class="${textColor}">${message}</span>`;
+
+                // Add new line to the top
+                log.prepend(newLine);
+
+                // Simple check to keep log size reasonable (optional)
+                while (log.children.length > LOG_MAX_LINES) {
+                    log.removeChild(log.lastChild);
+                }
+            }
+
+            function updateUI(status, details = '', currentStep = '') {
+                // Clear any previous error message
+                elements.errorMessage.classList.add('hidden');
+                elements.finalScore.classList.remove('text-green-600', 'text-red-600', 'text-yellow-600', 'text-gray-400');
+
                 if (status === 'loading') {
-                    button.disabled = true;
-                    button.textContent = 'Agent Running...';
-                    loadingMessage.classList.remove('hidden');
-                    finalSummary.textContent = "Processing and self-correcting...";
-                    finalScore.textContent = '...';
-                    finalCritique.textContent = 'The Judge is actively reviewing the draft.';
-                    stepsTaken.textContent = '0';
-                    finalScore.classList.remove('text-green-600', 'text-red-600', 'text-yellow-600');
-                    finalScore.classList.add('text-gray-500');
+                    // Disable input and button to prevent double-submission
+                    elements.button.disabled = true;
+                    elements.inputArea.disabled = true;
+                    elements.maxStepsInput.disabled = true;
+
+                    elements.buttonText.textContent = currentStep || 'Agent Running...';
+                    elements.buttonSpinner.classList.remove('hidden');
+
+                    if (currentStep.includes("Judge")) {
+                        elements.finalSummary.textContent = "Processing and self-correcting...";
+                    }
+                    elements.finalScore.textContent = '...';
+                    elements.finalCritique.textContent = 'Judge is active.';
+                    elements.stepsTaken.textContent = elements.stepsTaken.textContent || '0';
+                    elements.finalScore.classList.add('text-gray-500');
+
                 } else if (status === 'ready') {
-                    button.disabled = false;
-                    button.textContent = 'Generate & Refine Summary';
-                    loadingMessage.classList.add('hidden');
+                    // Re-enable elements
+                    elements.button.disabled = false;
+                    elements.inputArea.disabled = false;
+                    elements.maxStepsInput.disabled = false;
+
+                    elements.buttonText.textContent = 'Generate & Refine Summary';
+                    elements.buttonSpinner.classList.add('hidden');
+
+                    if (details !== 'error') {
+                        addToLog("Process complete. Displaying final result.", 'SUCCESS');
+                    }
+
                 } else if (status === 'error') {
-                    finalSummary.textContent = "Error: Failed to connect to the API or process the request.";
-                    finalCritique.textContent = "Check your Flask server and API console for errors.";
-                    finalScore.textContent = 'ERR';
-                    finalScore.classList.remove('text-green-600', 'text-gray-500');
-                    finalScore.classList.add('text-red-600');
-                    updateUI('ready');
+                    // Display error message prominently
+                    elements.errorDetails.textContent = details;
+                    elements.errorMessage.classList.remove('hidden');
+                    elements.finalSummary.textContent = "Error: Failed to process request. See details above.";
+                    elements.finalCritique.textContent = "Check your Flask server console for backend errors.";
+                    elements.finalScore.textContent = 'ERR';
+                    elements.finalScore.classList.add('text-red-600');
+                    addToLog(`Fatal Error: ${details}`, 'ERROR');
+                    updateUI('ready', 'error'); // Transition back to ready state after showing error
                 }
             }
 
             async function runSummarizer() {
-                const documentText = inputArea.value.trim();
-                if (!documentText) {
-                    alert("Please paste a document to summarize.");
+                const documentText = elements.inputArea.value.trim();
+                const maxSteps = parseInt(elements.maxStepsInput.value, 10);
+
+                elements.processLog.innerHTML = ''; // Clear log on start
+
+                // Frontend validation
+                if (!documentText || documentText.length < 100) {
+                    elements.errorDetails.textContent = "Please paste a document with at least 100 characters to summarize.";
+                    elements.errorMessage.classList.remove('hidden');
                     return;
                 }
 
-                updateUI('loading');
+                updateUI('loading', '', 'Running Summarizer...');
+                addToLog(`Starting summarization agent. Max loops set to ${maxSteps}.`, 'INFO');
 
                 try {
                     const response = await fetch(API_URL, {
@@ -152,37 +320,63 @@
                     });
 
                     if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                        let errorDetail = `HTTP error! status: ${response.status}`;
+                        try {
+                            const errorData = await response.json();
+                            errorDetail = errorData.error || errorDetail;
+                        } catch (e) {
+                            errorDetail = `${response.statusText} (${response.status})`;
+                        }
+                        throw new Error(errorDetail);
                     }
 
                     const data = await response.json();
 
-                    // Update output fields
-                    finalSummary.textContent = data.final_summary || 'N/A';
-                    stepsTaken.textContent = data.refinement_steps_taken.toString();
-
-                    const judgeResult = data.final_judge_result || {};
-                    const score = judgeResult.score || 'N/A';
-                    finalScore.textContent = score;
-                    finalCritique.textContent = judgeResult.critique || 'No final critique available.';
-
-                    // Apply color based on score
-                    finalScore.classList.remove('text-gray-500');
-                    if (score >= 8) {
-                        finalScore.classList.add('text-green-600');
-                    } else if (score >= 5) {
-                        finalScore.classList.add('text-yellow-600');
-                    } else {
-                        finalScore.classList.add('text-red-600');
+                    // --- Update Process Log during the loop ---
+                    if (data.full_execution_log && Array.isArray(data.full_execution_log)) {
+                        data.full_execution_log.forEach(logEntry => {
+                            if (logEntry.node_name === 'summarize') {
+                                addToLog(`[Step 0] Drafting initial summary.`, 'INFO');
+                            } else if (logEntry.node_name === 'judge') {
+                                const score = logEntry.result?.score || 'N/A';
+                                const action = logEntry.result?.should_refine ? 'FAIL (Refining)' : 'PASS (Stopping)';
+                                addToLog(`[Loop ${logEntry.loop_count}] Judge critique received (Score: ${score}/10, Decision: ${action})`, 'CRITIQUE');
+                                if (logEntry.result?.critique) {
+                                    addToLog(`Critique: "${logEntry.result.critique.substring(0, 80)}..."`, 'CRITIQUE');
+                                }
+                            } else if (logEntry.node_name === 'refine') {
+                                addToLog(`[Loop ${logEntry.loop_count}] Refining summary based on Judge feedback.`, 'INFO');
+                            }
+                        });
                     }
 
-                } catch (error) {
-                    console.error("Fetch error:", error);
-                    updateUI('error');
-                } finally {
-                    updateUI('ready');
+                    // Update output fields
+                    elements.finalSummary.textContent = data.final_summary || 'N/A';
+                    elements.stepsTaken.textContent = data.refinement_steps_taken.toString();
+
+                    const judgeResult = data.final_judge_result || {};
+                    const score = judgeResult.score;
+                    elements.finalScore.textContent = score;
+                    elements.finalCritique.textContent = judgeResult.critique || 'No final critique available.';
+
+                    // Apply color based on score
+                    if (score !== undefined) {
+                        if (score >= 8) {
+                        elements.finalScore.classList.add('text-green-600');
+                    } else if (score >= 5) {
+                        elements.finalScore.classList.add('text-yellow-600');
+                    } else {
+                        elements.finalScore.classList.add('text-red-600');
+                    }
                 }
+
+            } catch (error) {
+                console.error("Fetch error:", error);
+                updateUI('error', error.message || "Could not connect to the API. Check your console for details.");
+            } finally {
+                updateUI('ready');
             }
+        }
         </script>
     </div>
 

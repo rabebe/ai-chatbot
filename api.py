@@ -41,6 +41,17 @@ else:
 # --- API Endpoint ---
 
 
+@app.route("/", methods=["GET"])
+def root_status():
+    """Returns a simple status message for the root path."""
+    return jsonify(
+        {
+            "status": "LangGraph Summarization Service is running",
+            "message": "Use a POST request to the /summarize endpoint to process documents.",
+        }
+    ), 200
+
+
 @app.route("/summarize", methods=["POST"])
 def summarize_document():
     """
