@@ -125,7 +125,7 @@
 
             <!-- Error Alert -->
             <p id="errorMessage" class="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg hidden font-medium" role="alert">
-                <span class="font-bold">API Error:</span> <span id="errorDetails"></span>
+                <span class="font-bold">Error:</span> <span id="errorDetails"></span>
             </p>
         </div>
 
@@ -172,7 +172,7 @@
         <!-- JavaScript Logic -->
         <script>
             // Use the Flask API endpoint running locally
-            const API_URL = 'https://ai-chatbot-83je.onrender.com/summarize';
+            const API_URL = 'http://localhost:5001/summarize';
             const LOG_MAX_LINES = 10;
 
             const elements = {
@@ -315,7 +315,7 @@
                         },
                         body: JSON.stringify({
                             document: documentText,
-                            max_refinement_steps: MAX_STEPS
+                            max_refinement_steps: maxSteps
                         }),
                     });
 

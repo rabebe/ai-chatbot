@@ -1,13 +1,8 @@
 import logging
-from flask import Flask, request, jsonify
+import os
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 from dotenv import load_dotenv
-
-try:
-    from flask_cors import CORS
-
-    HAS_CORS = True
-except ImportError:
-    HAS_CORS = False
 
 # --- Configuration & Setup ---
 
@@ -27,29 +22,40 @@ from src.core.document_processor import process_document  # noqa: E402
 
 # Initialize Flask app
 app = Flask(__name__)
-
 # NOTE: Using CORS for development purposes to allow the frontend (index.html)
 # to talk to this API from a different port/origin.
-if HAS_CORS:
-    CORS(app)
-    logger.info("Flask-CORS enabled.")
-else:
-    logger.warning(
-        "Flask-CORS not installed. You may encounter CORS issues if running frontend locally."
-    )
+
+# --- TEMPLATE PATH FIX ---
+# Calculate the absolute path to the templates folder and set it explicitly
+script_dir = os.path.dirname(os.path.abspath(__file__))
+template_path = os.path.join(script_dir, "templates")
+app.template_folder = template_path
+logger.info(f"Flask template folder manually set to: {app.template_folder}")
+
+CORS(app)
+logger.info("Flask-CORS initialized, allowing all origins (*).")
 
 # --- API Endpoint ---
 
 
 @app.route("/", methods=["GET"])
-def root_status():
-    """Returns a simple status message for the root path."""
-    return jsonify(
-        {
-            "status": "LangGraph Summarization Service is running",
-            "message": "Use a POST request to the /summarize endpoint to process documents.",
-        }
-    ), 200
+@app.route("/index.html", methods=["GET"])
+def serve_index():
+    """Returns the main index.html file from the 'template' folder."""
+    # This check runs every time the route is hit and will confirm the file's presence.
+    full_path_check = os.path.join(app.template_folder, "index.html")
+    if not os.path.exists(full_path_check):
+        logger.error(f"Template NOT FOUND at expected path: {full_path_check}")
+        # Raising an error here so the user sees the path in the traceback immediately
+        raise Exception(
+            f"Configuration Error: 'index.html' not found. Expected path: {full_path_check}"
+        )
+    else:
+        logger.info(f"Template check SUCCESS: 'index.html' found at: {full_path_check}")
+    # --- END CRITICAL DIAGNOSTIC CHECK ---
+
+    # This is the most reliable way to serve the HTML using Flask's templating engine
+    return render_template("index.html")
 
 
 @app.route("/summarize", methods=["POST"])
@@ -64,6 +70,7 @@ def summarize_document():
     try:
         data = request.get_json()
         document = data.get("document")
+
         # Check for minimum length to ensure we have something meaningful to summarize
         if not document or not isinstance(document, str) or len(document) < 100:
             return jsonify(
@@ -124,7 +131,8 @@ def summarize_document():
             }
         else:
             critique_details = {
-                "status": "Process completed without final judge result."
+                "scpre": "N/A",
+                "critique": "Agent stopped before final critique",
             }
 
         # 6. Return structured output to the frontend
