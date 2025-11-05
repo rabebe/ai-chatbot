@@ -3,179 +3,343 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Self-Correcting Summarizer Agent</title>
+    <title>RefineBot: Self-Refining Agent</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
+
+
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Use Inter font family -->
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f7fafc; }
-        .card { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+        /* Define a custom, energetic color palette */
+        :root {
+            --color-primary: #818cf8; /* Light Indigo-400 */
+            --color-accent: #22d3ee;  /* Bright Cyan-400 */
+            --color-bg: #111827;      /* Very Dark Blue-Gray */
+            --color-card: #1f2937;    /* Slightly Lighter Card Background */
+            --color-text-default: #f3f4f6; /* Light Text */
+        }
+
+        /*
+           CRITICAL FIX: Removed the conflicting 'p-4 sm:p-8' classes from the body tag.
+           We are now enforcing all clearance via the style block to ensure no conflicts.
+        */
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--color-bg);
+            /* Subtle radial gradient for depth */
+            background-image: radial-gradient(circle at 10% 90%, #293441, var(--color-bg) 70%);
+            color: var(--color-text-default); /* Set default text color to light */
+
+            padding-top: 160px;
+        }
+
+        /* Enhanced Card Design - Dark Mode */
+        .card {
+            background: var(--color-card);
+            box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.4), 0 4px 10px -2px rgba(0, 0, 0, 0.2);
+            border-radius: 1.5rem;
+            transition: all 0.3s ease;
+            border: 1px solid #374151; /* Dark border for definition */
+        }
+
+        /* Loading Spinner */
         .spinner {
-            border: 4px solid rgba(255, 255, 255, 0.3);
-            border-top: 4px solid white;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid white;
             border-radius: 50%;
-            width: 1.5rem;
-            height: 1.5rem;
+            width: 1.25rem;
+            height: 1.25rem;
             animation: spin 1s linear infinite;
         }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        /* Custom styles for the info icon and tooltip */
-        .info-icon {
-            cursor: pointer;
-            color: #6b7280; /* Gray-500 */
+
+        /* Custom Agent Button Styling */
+        .agent-button {
+            background-color: var(--color-primary);
+            box-shadow: 0 4px 15px -3px rgba(129, 140, 248, 0.5), 0 2px 4px -2px rgba(129, 140, 248, 0.4);
+            transition: all 0.3s ease;
+            color: #1f2937; /* Dark text on bright button */
+            font-weight: 900;
         }
+        .agent-button:hover {
+            background-color: #6366f1; /* Slightly darker indigo on hover */
+            box-shadow: 0 8px 20px -3px rgba(129, 140, 248, 0.6), 0 4px 6px -2px rgba(129, 140, 248, 0.5);
+        }
+        .agent-button:active {
+            transform: scale(0.98);
+        }
+
+        /* Input focus state */
+        textarea:focus {
+            outline: none;
+            box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.5); /* Indigo focus ring */
+            border-color: var(--color-primary);
+        }
+
+        /* Tooltip Styles */
+        .info-icon { cursor: pointer; color: #9ca3af; }
         .tooltip-text {
-            visibility: hidden;
-            width: 700px;
-            background-color: #374151; /* Gray-700 */
-            color: #fff;
-            text-align: center;
-            border-radius: 6px;
-            padding: 5px 10px;
-            position: absolute;
-            z-index: 10;
-            bottom: 125%; /* Position above the icon */
-            left: 50%;
-            margin-left: -180px;
-            opacity: 0;
-            transition: opacity 0.3s;
-            font-size: 0.75rem;
+            visibility: hidden; width: 700px; background-color: #374151; color: #fff;
+            text-align: center; border-radius: 6px; padding: 5px 10px; position: absolute;
+            z-index: 10; bottom: 125%; left: 50%; margin-left: -180px; opacity: 0;
+            transition: opacity 0.3s; font-size: 0.75rem;
         }
-        .info-container:hover .tooltip-text {
-            visibility: visible;
-            opacity: 1;
-        }
+        .info-container:hover .tooltip-text { visibility: visible; opacity: 1; }
         .tooltip-text::after {
-            content: "";
-            position: absolute;
-            top: 100%;
-            left: 50%;
-            margin-left: -5px;
-            border-width: 5px;
-            border-style: solid;
-            border-color: #374151 transparent transparent transparent;
+            content: ""; position: absolute; top: 100%; left: 50%; margin-left: -5px;
+            border-width: 5px; border-style: solid; border-color: #374151 transparent transparent transparent;
+        }
+
+        /* Dynamic Log Entry Animation */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .log-entry {
+            animation: fadeIn 0.4s ease-out;
+            padding: 4px 0;
         }
     </style>
 </head>
-<body class="p-4 sm:p-8 min-h-screen flex items-center justify-center">
+<body class="min-h-screen">
 
-    <div class="w-full max-w-4xl space-y-8">
-        <header class="text-center">
-            <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-800">
-                Self-Correcting Summarization Agent
-            </h1>
-            <p class="mt-2 text-lg text-gray-500">
-                Critique-and-refine LLM workflow.
-            </p>
-        </header>
+    <!-- ============================================== -->
+    <!-- FIXED HEADER (NAV BAR) -->
+    <!-- ============================================== -->
+    <header id="fixedHeader" class="fixed top-0 left-0 w-full z-30 card border-b border-[#374151] shadow-2xl py-4 transition duration-300">
+        <div class="max-w-4xl mx-auto px-4 sm:px-0 flex justify-between items-center">
 
-        <!-- Main Input Card -->
-        <div class="card bg-white p-6 sm:p-8 rounded-xl border border-gray-200">
-            <h2 class="text-xl font-semibold mb-4 text-gray-700">1. Input Document</h2>
-            <!-- Updated text area by removing default text, added maxlength, refined placeholder-->
-            <textarea
-                id="documentInput"
-                class="w-full h-48 p-4 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150"
-                placeholder="Paste your long document here. The agent will summarize it and loop through refinement steps until quality criteria are met."
-            ></textarea>
-            <!-- Character Counter -->
-            <div class="text-right text-sm text-gray-500 mt-1">
-                <span id="charCount" class="font-medium">0</span> / 25,000 characters
+            <!-- Left Side (Home Button - visible only on appPage) -->
+            <button
+                id="headerHomeButton"
+                onclick="navigateTo('homePage')"
+                class="px-4 py-2 bg-gray-700 text-gray-200 text-sm font-semibold rounded-full hover:bg-gray-600 transition duration-150 flex items-center hidden"
+            >
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
+                Home
+            </button>
+            <div id="headerHomePlaceholder" class="w-[80px] hidden"></div> <!-- Placeholder to balance title on home page -->
+
+            <!-- Center (Title & Logo) -->
+            <div onclick="navigateTo('homePage')" class="flex items-center space-x-3 cursor-pointer group mx-auto" title="Go to Home/Reset Workbench">
+                <h1 id="fixedHeaderTitle" class="text-3xl font-extrabold text-gray-100 tracking-tight transition-colors duration-300 group-hover:text-cyan-400">
+                    RefineBot
+                </h1>
+                <img src="{{ url_for('static', filename='logo.png') }}" alt="RefineBot Logo" class="w-8 h-8 transition-transform duration-300 group-hover:scale-110">
             </div>
 
-            <!-- Layout adjusted for better spacing on mobile and desktop-->
-            <div class="mt-6 flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-4 sm:space-x-6">
-                <!-- Max Steps Input with Tooltip for clarity-->
-                <div class="flex items-center space-x-3">
-                    <label for="maxStepsInput" class="text-sm font-medium text-gray-600 whitespace-nowrap flex items-center">
-                    Max Refinement Steps:
-                        <span class="info-container relative ml-2">
-                            <!-- SVG Info Icon -->
-                            <svg class="info-icon w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.75.75 0 01.753.75v3a.75.75 0 01-1.5 0v-.256a.75.75 0 00-.75-.75h-.257a.75.75 0 00-.75.75v.256a.75.75 0 01-1.5 0v-3a.75.75 0 01.75-.75h.253a.75.75 0 00.75-.75V9z" clip-rule="evenodd" />
-                            </svg>
-                            <!-- Tooltip Text -->
-                            <span class="tooltip-text">
-                                The maximum number of times the agent will loop (Summarize, Critique, Refine) before stopping. Set to 0 for initial draft only.
-                            </span>
-                        </span>
-                    </label>
-                    <input
-                        type="number"
-                        id="maxStepsInput"
-                        value="3"
-                        min="0"
-                        max="5"
-                        class="w-16 p-2 border border-gray-300 rounded-lg text-center font-bold text-gray-800 focus:ring-blue-500 focus:border-blue-500"
-                    />
+            <!-- Right Side (Spacer for balance) -->
+            <div id="headerRightContent" class="w-[80px] text-right">
+                <!-- Content will be added here if needed -->
+            </div>
+        </div>
+    </header>
+
+
+    <!-- Main content wrapper. Now includes padding-x classes for proper horizontal spacing. -->
+    <div class="w-full max-w-4xl mx-auto space-y-8 px-4 sm:px-8">
+
+        <!-- ============================================== -->
+        <!-- 1. HOME PAGE (RefineBot Introduction) -->
+        <!-- ============================================== -->
+        <div id="homePage" class="hidden">
+            <!-- Removed mt-6. Relying on body padding. -->
+            <header class="text-center mb-12">
+                <!-- Title moved to fixed header, keeping the large logo/intro here -->
+                <div onclick="navigateTo('homePage')" class="cursor-pointer group inline-block" title="Reload Home">
+                    <div class="flex justify-center items-center mb-4">
+                        <!-- RefineBot Icon (Simple SVG) -->
+                    </div>
+                    <h1 class="text-5xl sm:text-6xl font-extrabold text-gray-100 tracking-tight transition-colors duration-300 group-hover:text-cyan-400">
+                        Meet RefineBot
+                    </h1>
                 </div>
+                <p class="mt-4 text-xl text-indigo-400 font-medium">
+                    Your Self-Correcting AI Partner for Flawless Summaries.
+                </p>
+            </header>
 
-                <button
-                    id="summarizeButton"
-                    onclick="runSummarizer()"
-                    class="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white font-bold rounded-full hover:bg-blue-700 transition duration-150 shadow-lg active:scale-[0.98] disabled:bg-gray-400"
-                >
-                    <span id="buttonText">Generate & Refine Summary</span>
-                    <div id="buttonSpinner" class="spinner ml-3 hidden"></div>
-                </button>
+            <div class="card p-8 sm:p-12 shadow-2xl">
+                <h2 class="text-3xl font-bold text-gray-100 mb-6 flex items-center">
+                    <span class="text-cyan-400 mr-3">✔</span> How RefineBot Works
+                </h2>
+                <p class="text-lg text-gray-300 mb-6 leading-relaxed">
+                    RefineBot uses a powerful Critique-and-Refine Loop to guarantee high-quality results. It doesn't just create a draft—it actively judges, identifies flaws, and fixes its own work, repeating the process until the summary is perfect.
+                </p>
+
+                <ol class="space-y-4 list-none text-gray-200 mb-8 p-4 bg-gray-900 rounded-xl border border-gray-700">
+                    <li class="grid grid-cols-[8rem_1fr] items-start gap-x-4">
+                        <span class="text-xl font-bold text-indigo-400 mr-4 whitespace-nowrap">1. Draft:</span> Initial summary creation.
+                    </li>
+                    <li class="grid grid-cols-[8rem_1fr] items-start gap-x-4">
+                        <span class="text-xl font-bold text-indigo-400 mr-4 whitespace-nowrap">2. Judge:</span> An independent AI Judge scores the draft (1-10) and provides detailed critique.
+                    </li>
+                    <li class="grid grid-cols-[8rem_1fr] items-start gap-x-4">
+                        <span class="text-xl font-bold text-indigo-400 mr-4 whitespace-nowrap">3. Refine:</span> RefineBot uses the critique to iterate and improve the summary.
+                    </li>
+                </ol>
+
+                <div class="text-center">
+                    <button
+                        onclick="navigateTo('appPage')"
+                        class="px-10 py-4 font-extrabold text-xl rounded-full agent-button"
+                    >
+                        Start Refinement Process
+                    </button>
+                </div>
             </div>
-
-            <!-- Error Alert -->
-            <p id="errorMessage" class="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg hidden font-medium" role="alert">
-                <span class="font-bold">Error:</span> <span id="errorDetails"></span>
-            </p>
         </div>
 
-        <!-- Output Card -->
-        <div class="card bg-white p-6 sm:p-8 rounded-xl border border-gray-200">
-            <h2 class="text-xl font-semibold mb-4 text-gray-700">2. Final Result & Quality Metrics</h2>
 
-            <!-- Summary Output -->
-            <div class="mb-6">
-                <h3 class="text-lg font-bold text-gray-800 mb-2 border-b pb-1">Final Summary</h3>
-                <p id="finalSummary" class="text-gray-700 italic bg-gray-50 p-3 rounded-lg border border-gray-100 min-h-[5rem]">
-                    Ready to summarize your document...
+        <!-- ============================================== -->
+        <!-- 2. MAIN APPLICATION PAGE (SUMMARIZER) -->
+        <!-- ============================================== -->
+        <div id="appPage" class="hidden">
+            <!-- Removed mt-6. Relying on body padding. -->
+            <h2 class="text-3xl font-extrabold text-gray-100 tracking-tight mb-6 text-center">
+                Workbench
+            </h2>
+
+            <!-- Main Input Card (1. Document & Config) -->
+            <div class="card p-6 sm:p-8 shadow-xl">
+                <h2 class="text-2xl font-semibold mb-4 text-gray-200 flex items-center">
+                    <span class="text-indigo-400 mr-3 text-2xl font-bold">Step 1.  Input Document & Settings</span>
+                </h2>
+                <textarea
+                    id="documentInput"
+                    maxlength="25000"
+                    class="w-full h-48 p-4 border-2 border-gray-600 rounded-xl transition duration-300 resize-none text-gray-100 placeholder:text-gray-500 bg-gray-900"
+                    placeholder="Paste the document you need RefineBot to summarize and perfect."
+                ></textarea>
+
+                <!-- Character Counter -->
+                <div class="text-right text-sm text-gray-400 mt-2">
+                    <span id="charCount" class="font-bold">0</span> / 25,000 characters
+                </div>
+
+                <!-- Action Row -->
+                <div class="mt-6 flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-4 sm:space-y-0 sm:space-x-6">
+                    <!-- Max Steps Input -->
+                    <div class="flex items-center space-x-3">
+                        <label for="maxStepsInput" class="text-base font-medium text-gray-400 whitespace-nowrap flex items-center">
+                        Max Refinements:
+                            <span class="info-container relative ml-2">
+
+                                <svg class="info-icon w-5 h-9" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.75.75 0 01.753.75v3a.75.75 0 01-1.5 0v-.256a.75.75 0 00-.75-.75h-.257a.75.75 0 00-.75.75v.256a.75.75 0 01-1.5 0v-3a.75.75 0 01.75-.75h.253a.75.75 0 00.75-.75V9z" clip-rule="evenodd" />
+                                </svg>
+                                <span class="tooltip-text">
+                                    The maximum number of times RefineBot will loop (Draft, Judge, Fix) before stopping. Set to 0 for initial draft only.
+                                </span>
+                            </span>
+                        </label>
+                        <input
+                            type="number"
+                            id="maxStepsInput"
+                            value="3"
+                            min="0"
+                            max="5"
+                            class="w-16 p-2 border border-gray-600 rounded-lg text-center font-bold text-gray-100 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-900"
+                        />
+                    </div>
+
+                    <!-- Action Button -->
+                    <button
+                        id="summarizeButton"
+                        onclick="runSummarizer()"
+                        type="button"
+                        class="w-full sm:w-auto px-8 py-3 font-extrabold rounded-full disabled:bg-gray-700 disabled:shadow-none disabled:text-gray-400 flex items-center justify-center agent-button"
+                    >
+                        <span id="buttonText">Start RefineBot</span>
+                        <div id="buttonSpinner" class="spinner ml-3 hidden"></div>
+                    </button>
+                </div>
+
+                <!-- Error Alert -->
+                <p id="errorMessage" class="mt-4 p-3 bg-red-900 border border-red-600 text-red-300 rounded-lg hidden font-medium" role="alert">
+                    <span class="font-bold">ERROR:</span> <span id="errorDetails"></span>
                 </p>
             </div>
 
-            <!-- Metrics and Feedback -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="col-span-1">
-                    <h3 class="text-sm font-bold text-gray-800 mb-1">Refinement Steps</h3>
-                    <p id="stepsTaken" class="text-2xl font-extrabold text-blue-600">0</p>
-                    <p class="text-xs text-gray-500">Loops executed (0 is initial draft)</p>
-                </div>
-                <div class="col-span-1">
-                    <h3 class="text-sm font-bold text-gray-800 mb-1">Judge Score (1-10)</h3>
-                    <p id="finalScore" class="text-2xl font-extrabold text-green-600">N/A</p>
-                    <p class="text-xs text-gray-500">Final quality score</p>
-                </div>
-                <div class="md:col-span-1">
-                    <h3 class="text-sm font-bold text-gray-800 mb-1">Final Critique</h3>
-                    <p id="finalCritique" class="text-xs text-gray-600 italic">No critique received yet.</p>
-                </div>
-            </div>
+            <!-- Output Card (2. Results & Metrics) -->
+            <div class="card p-6 sm:p-8 shadow-xl">
+                <h2 class="text-2xl font-semibold mb-4 text-gray-200 flex items-center">
+                    <span class="text-indigo-400 mr-3 text-2xl font-bold">Step 2.  Final Summary & Metrics</span>
+                </h2>
 
-                        <!-- Process Log (New for clarity) -->
-            <div class="mt-8 pt-6 border-t border-gray-200">
-                <h3 class="text-lg font-bold text-gray-800 mb-2">3. Agent Process Log</h3>
-                <div id="processLog" class="bg-gray-800 text-gray-200 text-sm p-4 rounded-lg font-mono overflow-auto h-32">
-                    [System] Ready. Enter document and click 'Generate & Refine Summary'.
+                <!-- Summary Output -->
+                <div class="mb-6 border-b border-gray-700 pb-4">
+                    <h3 class="text-sm font-bold text-gray-300 mb-1 uppercase tracking-wider">
+                        Final Refined Summary
+                    </h3>
+                    <div id="finalSummary" class="text-sm text-gray-300 italic bg-gray-900 p-3 rounded-lg border border-gray-700 min-h-[4rem]">
+                        RefineBot is ready to summarize your text.
+                    </div>
+                </div>
+
+                <!-- Metrics and Feedback -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
+
+                    <!-- Judge Score (Enhanced Badge) -->
+                    <div class="col-span-1 flex flex-col items-center justify-center">
+                        <h3 class="text-sm font-bold text-gray-300 mb-2 uppercase tracking-wider">Judge Score</h3>
+                        <div id="scoreBadge" class="w-24 h-24 flex items-center justify-center rounded-full transition-colors duration-500 shadow-xl bg-gray-400">
+                            <p id="finalScore" class="text-3xl font-extrabold text-white">N/A</p>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">Quality (1-10)</p>
+                    </div>
+
+                    <!-- Refinement Steps -->
+                    <div class="col-span-1 text-center mt-4 md:mt-0">
+                        <h3 class="text-sm font-bold text-gray-300 mb-1 uppercase tracking-wider">Total Fixes</h3>
+                        <p id="stepsTaken" class="text-4xl font-extrabold text-indigo-400 transition-all duration-300">0</p>
+                        <p class="text-xs text-gray-500">Self-Correction Loops</p>
+                    </div>
+
+                    <!-- Final Critique -->
+                    <div class="md:col-span-2 mt-4 md:mt-0">
+                        <h3 class="text-sm font-bold text-gray-300 mb-1 uppercase tracking-wider">Final Critique Summary</h3>
+                        <p id="finalCritique" class="text-sm text-gray-300 italic bg-gray-900 p-3 rounded-lg border border-gray-700 min-h-[4rem]">The Judge has not yet evaluated the final output.</p>
+                    </div>
+                </div>
+
+                <!-- Process Log (Styled) -->
+                <div class="mt-8 pt-6 border-t border-gray-700">
+                    <h3 class="text-lg font-bold text-gray-200 mb-2 flex items-center">
+                        <span class="text-indigo-400 mr-3 text-xl font-bold">3.</span> RefineBot's Log
+                    </h3>
+                    <!-- Log uses a dedicated dark background for high contrast messages -->
+                    <div id="processLog" class="bg-gray-900 text-gray-200 text-sm p-4 rounded-xl font-mono overflow-auto h-40 border-2 border-gray-700">
+                        <div class="log-entry">[SYSTEM] Initializing RefineBot systems... Ready to proceed.</div>
+                    </div>
                 </div>
             </div>
         </div>
 
+        <footer class="py-8 mt-12 text-center text-gray-500 text-sm border-t border-gray-700">
+            &copy; 2025 RefineBot. Powered by Gemini. All rights reserved.
+        </footer>
 
         <!-- JavaScript Logic -->
         <script>
-            // Use the Flask API endpoint running locally
+            // Note: Keep the API URL consistent with your Flask backend URL.
             const API_URL = 'https://ai-chatbot-83je.onrender.com/summarize';
-            const LOG_MAX_LINES = 10;
+            const LOG_MAX_LINES = 15;
 
             const elements = {
+                // Navigation Elements
+                homePage: document.getElementById('homePage'),
+                appPage: document.getElementById('appPage'),
+                fixedHeader: document.getElementById('fixedHeader'),
+                headerHomeButton: document.getElementById('headerHomeButton'),
+                headerHomePlaceholder: document.getElementById('headerHomePlaceholder'),
+                fixedHeaderTitle: document.getElementById('fixedHeaderTitle'),
+
+                // App Page Elements
                 button: document.getElementById('summarizeButton'),
                 buttonText: document.getElementById('buttonText'),
                 buttonSpinner: document.getElementById('buttonSpinner'),
@@ -186,10 +350,76 @@
                 finalSummary: document.getElementById('finalSummary'),
                 stepsTaken: document.getElementById('stepsTaken'),
                 finalScore: document.getElementById('finalScore'),
+                scoreBadge: document.getElementById('scoreBadge'),
                 finalCritique: document.getElementById('finalCritique'),
-                processLog: document.getElementById('processLog'), // NEW
+                processLog: document.getElementById('processLog'),
                 charCount: document.getElementById('charCount'),
             }
+
+            // --- NAVIGATION LOGIC ---
+
+            // This function now just sets the URL hash
+            function navigateTo(pageId) {
+                location.hash = pageId;
+            }
+
+            // This new function handles showing/hiding pages based on the hash
+            function handleHashChange() {
+                const pageId = location.hash.substring(1); // Get hash value without the '#'
+
+                elements.homePage.classList.add('hidden');
+                elements.appPage.classList.add('hidden');
+
+                // Set default/home state
+                let currentPageId = 'homePage';
+
+                if (pageId === 'appPage') {
+                    currentPageId = 'appPage';
+                    elements.appPage.classList.remove('hidden');
+                    elements.headerHomeButton.classList.remove('hidden');
+                    elements.headerHomePlaceholder.classList.add('hidden');
+
+                    elements.fixedHeaderTitle.textContent = 'RefineBot Workbench';
+
+                    resetAppPage(); // Reset the workbench every time you navigate to it
+                    document.title = 'RefineBot: Workbench';
+
+                } else {
+                    elements.homePage.classList.remove('hidden');
+                    elements.headerHomeButton.classList.add('hidden');
+                    elements.headerHomePlaceholder.classList.remove('hidden');
+
+                    elements.fixedHeaderTitle.textContent = 'RefineBot';
+
+                    document.title = 'RefineBot: Home';
+                }
+            }
+
+            // --- Function to reset the workbench page ---
+            function resetAppPage() {
+                // Clear inputs
+                elements.inputArea.value = '';
+                elements.maxStepsInput.value = '3';
+
+                // Reset output fields
+                elements.finalSummary.textContent = 'RefineBot is ready to summarize your text.';
+                elements.stepsTaken.textContent = '0';
+                elements.finalCritique.textContent = 'The Judge has not yet evaluated the final output.';
+
+                // Reset score badge
+                updateScoreBadge('N/A');
+
+                // Clear logs and errors
+                elements.processLog.innerHTML = '<div class="log-entry">[SYSTEM] Workbench reset. Ready for new task.</div>';
+                elements.errorMessage.classList.add('hidden');
+
+                // Reset char count
+                updateCharCount();
+
+                // Ensure UI is in ready state (if it was stuck in loading)
+                updateUI('ready');
+            }
+
             // --- Character Counter Logic ---
             function updateCharCount() {
                 const input = elements.inputArea.value.length;
@@ -197,97 +427,107 @@
 
                 elements.charCount.textContent = input.toLocaleString();
 
-                // Simple visual feedback for user
-                if (input > max * 0.9) { // Highlight red when near the limit (90%)
-                    elements.charCount.classList.add('text-red-500');
-                    elements.charCount.classList.remove('text-blue-500');
-                } else if (input > max * 0.5) { // Highlight blue when over half
-                    elements.charCount.classList.remove('text-red-500');
-                    elements.charCount.classList.add('text-blue-500');
+                if (input > max * 0.9) {
+                    elements.charCount.classList.add('text-red-400', 'font-extrabold');
+                    elements.charCount.classList.remove('text-indigo-400');
+                } else if (input > max * 0.5) {
+                    elements.charCount.classList.add('text-indigo-400');
+                    elements.charCount.classList.remove('text-red-400');
                 } else {
-                    elements.charCount.classList.remove('text-red-500', 'text-blue-500');
+                    elements.charCount.classList.remove('text-red-4Two', 'text-indigo-400', 'font-extrabold');
                 }
             }
 
-            // Set up the listener immediately
-            elements.inputArea.addEventListener('input', updateCharCount);
+            elements.inputArea?.addEventListener('input', updateCharCount);
 
-            // Call once on load to initialize the count
-            window.onload = updateCharCount;
+            // --- Core App UI and Logic Functions ---
 
-            // --- Logging and UI Update Functions ---
             function addToLog(message, type = 'INFO') {
                 const log = elements.processLog;
 
-                // Prepend new message with a timestamp
                 const now = new Date();
-                const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-                // Create a new line element with type-specific styling
                 const newLine = document.createElement('div');
-                newLine.className = `whitespace-pre-wrap`;
+                newLine.className = `log-entry whitespace-pre-wrap text-sm`;
 
-                let textColor = 'text-gray-200';
+                let textColor = 'text-gray-300';
                 if (type === 'ERROR') textColor = 'text-red-400 font-bold';
                 else if (type === 'SUCCESS') textColor = 'text-green-400 font-bold';
                 else if (type === 'CRITIQUE') textColor = 'text-yellow-400 italic';
+                else if (type === 'ACTION') textColor = 'text-cyan-400 font-medium'; // Cyan for action
 
+                // Log background is dark, so text colors are bright/vibrant
                 newLine.innerHTML = `<span class="text-gray-500">[${timeStr}]</span> <span class="${textColor}">${message}</span>`;
 
-                // Add new line to the top
                 log.prepend(newLine);
 
-                // Simple check to keep log size reasonable (optional)
                 while (log.children.length > LOG_MAX_LINES) {
                     log.removeChild(log.lastChild);
                 }
             }
 
+            function updateScoreBadge(score) {
+                const badge = elements.scoreBadge;
+                badge.className = "w-24 h-24 flex items-center justify-center rounded-full transition-colors duration-500 shadow-xl";
+
+                if (score === 'N/A' || score === 'ERR' || score === '...') {
+                    badge.classList.add('bg-gray-600', 'shadow-gray-700/50');
+                } else if (score >= 8) {
+                    badge.classList.add('bg-green-600', 'shadow-green-500/50');
+                } else if (score >= 5) {
+                    badge.classList.add('bg-yellow-600', 'shadow-yellow-500/50');
+                } else {
+                    badge.classList.add('bg-red-600', 'shadow-red-500/50');
+                }
+                elements.finalScore.textContent = score;
+            }
+
             function updateUI(status, details = '', currentStep = '') {
-                // Clear any previous error message
                 elements.errorMessage.classList.add('hidden');
-                elements.finalScore.classList.remove('text-green-600', 'text-red-600', 'text-yellow-600', 'text-gray-400');
 
                 if (status === 'loading') {
-                    // Disable input and button to prevent double-submission
                     elements.button.disabled = true;
                     elements.inputArea.disabled = true;
                     elements.maxStepsInput.disabled = true;
 
-                    elements.buttonText.textContent = currentStep || 'Agent Running...';
+                    elements.buttonText.textContent = currentStep || 'RefineBot is Busy...';
                     elements.buttonSpinner.classList.remove('hidden');
 
-                    if (currentStep.includes("Judge")) {
-                        elements.finalSummary.textContent = "Processing and self-correcting...";
+                    if (currentStep.includes("Refining")) {
+                         // Use cyan for the focus animation
+                         elements.finalSummary.classList.add('border-cyan-400', 'ring-2', 'ring-cyan-400', 'animate-pulse');
+                    } else {
+                         elements.finalSummary.classList.remove('border-cyan-400', 'ring-2', 'ring-cyan-400', 'animate-pulse');
                     }
-                    elements.finalScore.textContent = '...';
-                    elements.finalCritique.textContent = 'Judge is active.';
-                    elements.stepsTaken.textContent = elements.stepsTaken.textContent || '0';
-                    elements.finalScore.classList.add('text-gray-500');
+                    elements.finalSummary.textContent = "RefineBot is actively processing and self-correcting the document...";
+                    elements.finalCritique.textContent = 'Judge is active, standing by for evaluation...';
+                    updateScoreBadge('...');
 
                 } else if (status === 'ready') {
-                    // Re-enable elements
                     elements.button.disabled = false;
                     elements.inputArea.disabled = false;
                     elements.maxStepsInput.disabled = false;
 
-                    elements.buttonText.textContent = 'Generate & Refine Summary';
+                    elements.buttonText.textContent = 'Start RefineBot';
                     elements.buttonSpinner.classList.add('hidden');
+                    elements.finalSummary.classList.remove('border-cyan-400', 'ring-2', 'ring-cyan-400', 'animate-pulse');
 
                     if (details !== 'error') {
-                        addToLog("Process complete. Displaying final result.", 'SUCCESS');
+                        // Only add success log if it's not an error recovery
+                        if(elements.finalScore.textContent !== 'ERR') {
+                            addToLog("RefineBot process complete. Final result displayed.", 'SUCCESS');
+                        }
                     }
 
                 } else if (status === 'error') {
-                    // Display error message prominently
                     elements.errorDetails.textContent = details;
                     elements.errorMessage.classList.remove('hidden');
-                    elements.finalSummary.textContent = "Error: Failed to process request. See details above.";
-                    elements.finalCritique.textContent = "Check your Flask server console for backend errors.";
-                    elements.finalScore.textContent = 'ERR';
-                    elements.finalScore.classList.add('text-red-600');
-                    addToLog(`Fatal Error: ${details}`, 'ERROR');
-                    updateUI('ready', 'error'); // Transition back to ready state after showing error
+                    elements.finalSummary.textContent = "RefineBot encountered an error. Please check your document and API connection.";
+                    elements.finalCritique.textContent = "RefineBot requires system checks. Check server logs.";
+                    updateScoreBadge('ERR');
+                    addToLog(`FATAL ERROR: ${details}`, 'ERROR');
+                    updateUI('ready', 'error');
                 }
             }
 
@@ -297,22 +537,21 @@
 
                 elements.processLog.innerHTML = ''; // Clear log on start
 
-                // Frontend validation
                 if (!documentText || documentText.length < 100) {
-                    elements.errorDetails.textContent = "Please paste a document with at least 100 characters to summarize.";
+                    elements.errorDetails.textContent = "RefineBot requires a document of at least 100 characters to start the process.";
                     elements.errorMessage.classList.remove('hidden');
                     return;
                 }
 
-                updateUI('loading', '', 'Running Summarizer...');
-                addToLog(`Starting summarization agent. Max loops set to ${maxSteps}.`, 'INFO');
+                updateUI('loading', '', 'Initial Draft in Progress...');
+                addToLog(`RefineBot activated. Max fix loops set to ${maxSteps}.`, 'INFO');
+                elements.stepsTaken.textContent = '0';
+                updateScoreBadge('...');
 
                 try {
                     const response = await fetch(API_URL, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             document: documentText,
                             max_refinement_steps: maxSteps
@@ -332,51 +571,61 @@
 
                     const data = await response.json();
 
-                    // --- Update Process Log during the loop ---
+                    // --- Dynamic Log Update during the loop ---
                     if (data.full_execution_log && Array.isArray(data.full_execution_log)) {
                         data.full_execution_log.forEach(logEntry => {
                             if (logEntry.node_name === 'summarize') {
-                                addToLog(`[Step 0] Drafting initial summary.`, 'INFO');
+                                addToLog(`[DRAFTING] Creating initial summary draft.`, 'ACTION');
                             } else if (logEntry.node_name === 'judge') {
                                 const score = logEntry.result?.score || 'N/A';
-                                const action = logEntry.result?.should_refine ? 'FAIL (Refining)' : 'PASS (Stopping)';
-                                addToLog(`[Loop ${logEntry.loop_count}] Judge critique received (Score: ${score}/10, Decision: ${action})`, 'CRITIQUE');
-                                if (logEntry.result?.critique) {
-                                    addToLog(`Critique: "${logEntry.result.critique.substring(0, 80)}..."`, 'CRITIQUE');
-                                }
+                                const action = logEntry.result?.should_refine ? 'FAIL (Requires Fix)' : 'PASS (Finalizing)';
+                                addToLog(`[JUDGE L${logEntry.loop_count}] Critique Received (Score: ${score}/10, Decision: ${action})`, 'CRITIQUE');
+                                updateUI('loading', '', `Judge Evaluation (Loop ${logEntry.loop_count})`);
                             } else if (logEntry.node_name === 'refine') {
-                                addToLog(`[Loop ${logEntry.loop_count}] Refining summary based on Judge feedback.`, 'INFO');
+                                addToLog(`[REFINING L${logEntry.loop_count}] Executing fixes based on Judge's feedback.`, 'ACTION');
+                                updateUI('loading', '', `Refining Summary (Loop ${logEntry.loop_count})`);
                             }
                         });
                     }
 
-                    // Update output fields
+                    // --- Final UI Update ---
                     elements.finalSummary.textContent = data.final_summary || 'N/A';
                     elements.stepsTaken.textContent = data.refinement_steps_taken.toString();
 
                     const judgeResult = data.final_judge_result || {};
                     const score = judgeResult.score;
-                    elements.finalScore.textContent = score;
-                    elements.finalCritique.textContent = judgeResult.critique || 'No final critique available.';
+                    elements.finalCritique.textContent = judgeResult.critique || 'The summary passed its final review with no required fixes.';
 
-                    // Apply color based on score
-                    if (score !== undefined) {
-                        if (score >= 8) {
-                        elements.finalScore.classList.add('text-green-600');
-                    } else if (score >= 5) {
-                        elements.finalScore.classList.add('text-yellow-600');
-                    } else {
-                        elements.finalScore.classList.add('text-red-600');
-                    }
+                    updateScoreBadge(score);
+
+                } catch (error) {
+                    console.error("Fetch error:", error);
+                    updateUI('error', error.message || "Could not connect to the API. Check your browser/server consoles.");
+                } finally {
+                    updateUI('ready');
+                }
+            }
+
+            // --- INITIALIZATION LOGIC ---
+            document.addEventListener('DOMContentLoaded', () => {
+                elements.inputArea.maxLength = 25000;
+                // Add event listener only if the element exists to prevent errors
+                if (elements.inputArea) {
+                     elements.inputArea.addEventListener('input', updateCharCount);
+                     updateCharCount(); // Initial count
                 }
 
-            } catch (error) {
-                console.error("Fetch error:", error);
-                updateUI('error', error.message || "Could not connect to the API. Check your console for details.");
-            } finally {
-                updateUI('ready');
-            }
-        }
+                // Add listener for hash changes
+                window.addEventListener('hashchange', handleHashChange);
+
+                // Run on load to set the initial page
+                // Check if hash exists, otherwise default to homePage
+                if (!location.hash || location.hash === '#') {
+                    navigateTo('homePage');
+                } else {
+                    handleHashChange();
+                }
+            });
         </script>
     </div>
 

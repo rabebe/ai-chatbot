@@ -20,41 +20,32 @@ from src.core.models import AgentState, JudgeResult  # noqa: E402
 from src.core.document_processor import process_document  # noqa: E402
 
 
-# Initialize Flask app
-app = Flask(__name__)
-# NOTE: Using CORS for development purposes to allow the frontend (index.html)
-# to talk to this API from a different port/origin.
-
-# --- TEMPLATE PATH FIX ---
-# Calculate the absolute path to the templates folder and set it explicitly
+# --- PATH CONFIGURATION ---
+# Calculate the absolute paths to the templates and static folders
 script_dir = os.path.dirname(os.path.abspath(__file__))
 template_path = os.path.join(script_dir, "templates")
-app.template_folder = template_path
-logger.info(f"Flask template folder manually set to: {app.template_folder}")
+static_path = os.path.join(script_dir, "static")  # <-- THIS IS THE PATH FOR YOUR LOGO
+
+# Initialize Flask app
+app = Flask(
+    __name__,
+    template_folder=template_path,
+    static_folder=static_path,  # <-- THIS TELLS FLASK WHERE TO FIND 'logo.png'
+)
+
+logger.info(f"Flask template folder set to: {app.template_folder}")
+logger.info(f"Flask static folder set to: {app.static_folder}")
 
 CORS(app)
 logger.info("Flask-CORS initialized, allowing all origins (*).")
 
-# --- API Endpoint ---
+# --- API Endpoints ---
 
 
 @app.route("/", methods=["GET"])
 @app.route("/index.html", methods=["GET"])
 def serve_index():
-    """Returns the main index.html file from the 'template' folder."""
-    # This check runs every time the route is hit and will confirm the file's presence.
-    full_path_check = os.path.join(app.template_folder, "index.html")
-    if not os.path.exists(full_path_check):
-        logger.error(f"Template NOT FOUND at expected path: {full_path_check}")
-        # Raising an error here so the user sees the path in the traceback immediately
-        raise Exception(
-            f"Configuration Error: 'index.html' not found. Expected path: {full_path_check}"
-        )
-    else:
-        logger.info(f"Template check SUCCESS: 'index.html' found at: {full_path_check}")
-    # --- END CRITICAL DIAGNOSTIC CHECK ---
-
-    # This is the most reliable way to serve the HTML using Flask's templating engine
+    """Returns the main index.html file from the 'templates' folder."""
     return render_template("index.html")
 
 
@@ -71,6 +62,9 @@ def summarize_document():
         data = request.get_json()
         document = data.get("document")
 
+        # --- FIX: Get max_refinement_steps from the user's request ---
+        max_steps = data.get("max_refinement_steps", 3)  # Default to 3 if not provided
+
         # Check for minimum length to ensure we have something meaningful to summarize
         if not document or not isinstance(document, str) or len(document) < 100:
             return jsonify(
@@ -85,10 +79,7 @@ def summarize_document():
 
     # 2. Pre-processing (Chunking)
     try:
-        # Use the utility function to process the document into chunks
         document_docs = process_document(document)
-
-        # Convert LangChain Document objects to a simple list of strings for the state
         chunks = [doc.page_content for doc in document_docs]
 
         if not chunks:
@@ -105,7 +96,8 @@ def summarize_document():
             summary_draft="",
             judge_result=None,
             refinement_count=0,
-            max_refinement_steps=3,  # Loop limit to prevent infinite loops
+            # --- FIX: Use the user's input for max_refinement_steps ---
+            max_refinement_steps=max_steps,
         )
 
     except Exception as e:
@@ -114,8 +106,35 @@ def summarize_document():
 
     # 4. Agent Execution (Core Logic)
     try:
-        # Run the compiled LangGraph agent synchronously
-        final_state = agent_graph.invoke(initial_state)
+        # --- FIX: Pass the 'recursion_limit' to the invoke call ---
+        # This ensures the graph stops after the specified number of steps
+        config = {"recursion_limit": max_steps + 5}  # Add a buffer
+
+        # We need to capture the full log. We'll manually stream and collect it.
+        full_execution_log = []
+
+        # Stream the execution to get intermediate steps
+        for chunk in agent_graph.stream(initial_state, config=config):
+            # 'chunk' will be a dictionary with the node name as the key
+            node_name = list(chunk.keys())[0]
+            node_result = list(chunk.values())[0]
+
+            # Get the current state
+            current_loop_count = node_result.get("refinement_count", 0)
+
+            # Store the log entry
+            full_execution_log.append(
+                {
+                    "node_name": node_name,
+                    "loop_count": current_loop_count,
+                    "result": node_result.get(
+                        "judge_result"
+                    ),  # Only 'judge' will have this
+                }
+            )
+
+        # The final state is the last item in the log
+        final_state = list(full_execution_log[-1].values())[0]
 
         # 5. Extract Final Result and Metadata
         final_summary = final_state.get("summary_draft", "Summary not found.")
@@ -126,27 +145,29 @@ def summarize_document():
             critique_details = {
                 "score": final_judge_result.score,
                 "critique": final_judge_result.critique,
-                # This should always be False if the process ended successfully
                 "refinement_needed": final_judge_result.should_refine,
             }
         else:
             critique_details = {
-                "scpre": "N/A",
-                "critique": "Agent stopped before final critique",
+                "score": "N/A",  # <-- FIX: Corrected typo 'scpre'
+                "critique": "Agent stopped before final critique (max steps likely reached).",
             }
 
         # 6. Return structured output to the frontend
-        return jsonify(
-            {
-                "status": "success",
-                "final_summary": final_summary,
-                "refinement_steps_taken": final_state.get("refinement_count", 0),
-                "final_judge_result": critique_details,
-            }
-        ), 200
+        return (
+            jsonify(
+                {
+                    "status": "success",
+                    "final_summary": final_summary,
+                    "refinement_steps_taken": final_state.get("refinement_count", 0),
+                    "final_judge_result": critique_details,
+                    "full_execution_log": full_execution_log,  # <-- FIX: Send the log to the frontend
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
-        # Catch any errors from the LangGraph execution itself
         logger.error(f"LangGraph execution failed: {e}")
         return jsonify({"error": f"LangGraph execution failed: {e}"}), 500
 
@@ -154,5 +175,4 @@ def summarize_document():
 # --- Server Start ---
 if __name__ == "__main__":
     logger.info("Starting Flask application on http://127.0.0.1:5001...")
-    # Using 0.0.0.0 for broader access if run in a container/VM
     app.run(host="0.0.0.0", port=5001, debug=True)

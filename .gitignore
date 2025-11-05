@@ -20,6 +20,12 @@ logs/
 *.model
 *.onnx
 
+# Node.js
+/node_modules
+
+# Build artifacts
+/static/output.css
+
 # ChromaDB data
 data/chromadb/
 data/test_chromadb/
