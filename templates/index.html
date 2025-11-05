@@ -1,633 +1,729 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RefineBot: Self-Refining Agent</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
-
-
-    <!-- Load Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Use Inter font family -->
-    <style>
-        /* Define a custom, energetic color palette */
-        :root {
-            --color-primary: #818cf8; /* Light Indigo-400 */
-            --color-accent: #22d3ee;  /* Bright Cyan-400 */
-            --color-bg: #111827;      /* Very Dark Blue-Gray */
-            --color-card: #1f2937;    /* Slightly Lighter Card Background */
-            --color-text-default: #f3f4f6; /* Light Text */
-        }
-
-        /*
-           CRITICAL FIX: Removed the conflicting 'p-4 sm:p-8' classes from the body tag.
-           We are now enforcing all clearance via the style block to ensure no conflicts.
-        */
-        body {
-            font-family: 'Inter', sans-serif;
-            background: var(--color-bg);
-            /* Subtle radial gradient for depth */
-            background-image: radial-gradient(circle at 10% 90%, #293441, var(--color-bg) 70%);
-            color: var(--color-text-default); /* Set default text color to light */
-
-            padding-top: 160px;
-        }
-
-        /* Enhanced Card Design - Dark Mode */
-        .card {
-            background: var(--color-card);
-            box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.4), 0 4px 10px -2px rgba(0, 0, 0, 0.2);
-            border-radius: 1.5rem;
-            transition: all 0.3s ease;
-            border: 1px solid #374151; /* Dark border for definition */
-        }
-
-        /* Loading Spinner */
-        .spinner {
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-top: 3px solid white;
-            border-radius: 50%;
-            width: 1.25rem;
-            height: 1.25rem;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* Custom Agent Button Styling */
-        .agent-button {
-            background-color: var(--color-primary);
-            box-shadow: 0 4px 15px -3px rgba(129, 140, 248, 0.5), 0 2px 4px -2px rgba(129, 140, 248, 0.4);
-            transition: all 0.3s ease;
-            color: #1f2937; /* Dark text on bright button */
-            font-weight: 900;
-        }
-        .agent-button:hover {
-            background-color: #6366f1; /* Slightly darker indigo on hover */
-            box-shadow: 0 8px 20px -3px rgba(129, 140, 248, 0.6), 0 4px 6px -2px rgba(129, 140, 248, 0.5);
-        }
-        .agent-button:active {
-            transform: scale(0.98);
-        }
-
-        /* Input focus state */
-        textarea:focus {
-            outline: none;
-            box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.5); /* Indigo focus ring */
-            border-color: var(--color-primary);
-        }
-
-        /* Tooltip Styles */
-        .info-icon { cursor: pointer; color: #9ca3af; }
-        .tooltip-text {
-            visibility: hidden; width: 700px; background-color: #374151; color: #fff;
-            text-align: center; border-radius: 6px; padding: 5px 10px; position: absolute;
-            z-index: 10; bottom: 125%; left: 50%; margin-left: -180px; opacity: 0;
-            transition: opacity 0.3s; font-size: 0.75rem;
-        }
-        .info-container:hover .tooltip-text { visibility: visible; opacity: 1; }
-        .tooltip-text::after {
-            content: ""; position: absolute; top: 100%; left: 50%; margin-left: -5px;
-            border-width: 5px; border-style: solid; border-color: #374151 transparent transparent transparent;
-        }
-
-        /* Dynamic Log Entry Animation */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(5px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .log-entry {
-            animation: fadeIn 0.4s ease-out;
-            padding: 4px 0;
-        }
-    </style>
-</head>
-<body class="min-h-screen">
-
-    <!-- ============================================== -->
-    <!-- FIXED HEADER (NAV BAR) -->
-    <!-- ============================================== -->
-    <header id="fixedHeader" class="fixed top-0 left-0 w-full z-30 card border-b border-[#374151] shadow-2xl py-4 transition duration-300">
-        <div class="max-w-4xl mx-auto px-4 sm:px-0 flex justify-between items-center">
-
-            <!-- Left Side (Home Button - visible only on appPage) -->
+   <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>RefineBot: Self-Refining Agent</title>
+      <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
+      <script src="https://cdn.tailwindcss.com"></script>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+      <style>
+         /* Define a custom, energetic color palette, adjusting for a darker, sleeker theme */
+         :root {
+         --color-primary: #a78bfa; /* Light Purple-400 for accents */
+         --color-accent: #67e8f9;  /* Bright Cyan-400 for highlights */
+         --color-bg: #1f2937;      /* Dark Blue-Gray for background */
+         --color-card: #374151;    /* Slightly Lighter Card Background */
+         --color-text-default: #e5e7eb; /* Light Gray for default text */
+         --color-text-muted: #9ca3af;   /* Muted Gray for secondary text */
+         }
+         /* Base styles for a cleaner, modern look */
+         body {
+         font-family: 'Inter', sans-serif;
+         background: var(--color-bg);
+         /* Subtle, wide gradient for depth, drawing from Gemini's dark theme */
+         background-image: linear-gradient(to bottom right, #111827, #1f2937);
+         color: var(--color-text-default);
+         /* ADJUSTMENT 1: Increased padding-top to ensure content is not hidden by the fixed header */
+         padding-top: 120px;
+         /* ADJUSTMENT 1: Match scroll padding for smooth jumps */
+         scroll-padding-top: 120px;
+         }
+         /* Sleek Card Design - Less boxy, more integrated */
+         .card {
+         background-color: rgba(55, 65, 81, 0.5); /* Slightly translucent */
+         backdrop-filter: blur(8px); /* Frosted glass effect */
+         -webkit-backdrop-filter: blur(8px); /* Safari support */
+         border-radius: 1rem; /* More rounded corners */
+         border: 1px solid rgba(75, 85, 99, 0.3); /* Softer, thinner border */
+         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08); /* Lighter shadow */
+         transition: all 0.2s ease-in-out;
+         margin-bottom: 2rem; /* Consistent spacing between major sections */
+         }
+         /* Make cards full width on smaller screens */
+         @media (max-width: 1023px) { /* Equivalent to lg breakpoint */
+         .card {
+         border-radius: 0;
+         box-shadow: none;
+         border-left: none;
+         border-right: none;
+         }
+         }
+         /* Loading Spinner - unchanged, still effective */
+         .spinner {
+         border: 3px solid rgba(255, 255, 255, 0.3);
+         border-top: 3px solid white;
+         border-radius: 50%;
+         width: 1.25rem;
+         height: 1.25rem;
+         animation: spin 1s linear infinite;
+         }
+         @keyframes spin {
+         0% { transform: rotate(0deg); }
+         100% { transform: rotate(360deg); }
+         }
+         /* Agent Button Styling - Brighter, more inviting */
+         .agent-button {
+         background-color: var(--color-accent); /* Use bright accent color */
+         box-shadow: 0 6px 20px -5px rgba(103, 232, 249, 0.6); /* Cyan glow */
+         color: #1f2937; /* Dark text on bright button */
+         font-weight: 700;
+         padding: 0.8rem 2rem;
+         border-radius: 2rem;
+         transition: all 0.3s ease;
+         }
+         .agent-button:hover {
+         background-color: #22d3ee; /* Slightly brighter cyan on hover */
+         box-shadow: 0 8px 25px -5px rgba(103, 232, 249, 0.8);
+         transform: translateY(-2px); /* Slight lift */
+         }
+         .agent-button:active {
+         transform: scale(0.98) translateY(0);
+         box-shadow: 0 4px 10px -3px rgba(103, 232, 249, 0.4);
+         }
+         .agent-button:disabled {
+         background-color: #4b5563; /* Darker gray when disabled */
+         box-shadow: none;
+         color: #d1d5db;
+         cursor: not-allowed;
+         transform: none;
+         }
+         /* Input focus state - Clean indigo ring */
+         textarea:focus {
+         outline: none;
+         box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.4); /* Purple focus ring */
+         border-color: var(--color-primary);
+         }
+         /* General input styling */
+         input[type="number"] {
+         background-color: #374151; /* Darker input background */
+         border-color: #4b5563;
+         color: var(--color-text-default);
+         }
+         input[type="number"]:focus {
+         outline: none;
+         box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.3); /* Purple focus ring */
+         border-color: var(--color-primary);
+         }
+         /* Tooltip Styles - Subtler, darker background */
+         .tooltip-text {
+         background-color: #374151;
+         color: #e5e7eb;
+         font-size: 0.875rem; /* Slightly larger text */
+         }
+         .tooltip-text::after {
+         border-color: #374151 transparent transparent transparent;
+         }
+         /* Dynamic Log Entry Animation - unchanged */
+         @keyframes fadeIn {
+         from { opacity: 0; transform: translateY(5px); }
+         to { opacity: 1; transform: translateY(0); }
+         }
+         .log-entry {
+         animation: fadeIn 0.4s ease-out;
+         padding: 4px 0;
+         border-bottom: 1px dashed rgba(75, 85, 99, 0.3); /* Subtle separator */
+         }
+         .log-entry:last-child {
+         border-bottom: none;
+         }
+         /* Custom scrollbar for dark themes */
+         ::-webkit-scrollbar {
+         width: 8px;
+         background-color: transparent;
+         }
+         ::-webkit-scrollbar-thumb {
+         background-color: rgba(107, 114, 128, 0.5); /* Gray-500 with opacity */
+         border-radius: 10px;
+         }
+         ::-webkit-scrollbar-thumb:hover {
+         background-color: rgba(107, 114, 128, 0.7);
+         }
+      </style>
+   </head>
+   <body class="min-h-screen">
+      <header id="fixedHeader" class="fixed top-0 left-0 w-full z-30 bg-gray-900/60 backdrop-blur-md
+         border-b border-gray-700/50 shadow-lg
+         py-4 md:py-5 lg:py-6 transition-all duration-300">
+         <div class="max-w-7xl mx-auto px-4 sm:px-8 lg:px-16 flex justify-between items-center">
             <button
-                id="headerHomeButton"
-                onclick="navigateTo('homePage')"
-                class="px-4 py-2 bg-gray-700 text-gray-200 text-sm font-semibold rounded-full hover:bg-gray-600 transition duration-150 flex items-center hidden"
-            >
-                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg>
-                Home
+               id="headerHomeButton"
+               onclick="navigateTo('homePage')"
+               class="px-5 py-2 bg-gray-700 text-gray-200 text-sm font-semibold rounded-full
+               hover:bg-gray-600 transition duration-150 flex items-center hidden
+               shadow-md hover:shadow-lg"
+               >
+               <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path>
+               </svg>
+               Home
             </button>
-            <div id="headerHomePlaceholder" class="w-[80px] hidden"></div> <!-- Placeholder to balance title on home page -->
-
-            <!-- Center (Title & Logo) -->
-            <div onclick="navigateTo('homePage')" class="flex items-center space-x-3 cursor-pointer group mx-auto" title="Go to Home/Reset Workbench">
-                <h1 id="fixedHeaderTitle" class="text-3xl font-extrabold text-gray-100 tracking-tight transition-colors duration-300 group-hover:text-cyan-400">
-                    RefineBot
-                </h1>
-                <img src="{{ url_for('static', filename='logo.png') }}" alt="RefineBot Logo" class="w-8 h-8 transition-transform duration-300 group-hover:scale-110">
+            <div id="headerHomePlaceholder" class="w-[100px] hidden"></div>
+            <div onclick="navigateTo('homePage')" class="flex items-center space-x-4 cursor-pointer group mx-auto" title="Go to Home/Reset Workbench">
+               <h1 id="fixedHeaderTitle" class="text-4xl lg:text-5xl font-extrabold text-white tracking-tight transition-colors duration-300 group-hover:text-cyan-400">
+                  RefineBot
+               </h1>
+               <img src="{{ url_for('static', filename='logo.png') }}" alt="RefineBot Logo" class="w-10 h-10 lg:w-12 lg:h-12 transition-transform duration-300 group-hover:scale-110">
             </div>
-
-            <!-- Right Side (Spacer for balance) -->
-            <div id="headerRightContent" class="w-[80px] text-right">
-                <!-- Content will be added here if needed -->
+            <div id="headerRightContent" class="w-[100px] text-right">
             </div>
-        </div>
-    </header>
-
-
-    <!-- Main content wrapper. Now includes padding-x classes for proper horizontal spacing. -->
-    <div class="w-full max-w-4xl mx-auto space-y-8 px-4 sm:px-8">
-
-        <!-- ============================================== -->
-        <!-- 1. HOME PAGE (RefineBot Introduction) -->
-        <!-- ============================================== -->
-        <div id="homePage" class="hidden">
-            <!-- Removed mt-6. Relying on body padding. -->
-            <header class="text-center mb-12">
-                <!-- Title moved to fixed header, keeping the large logo/intro here -->
-                <div onclick="navigateTo('homePage')" class="cursor-pointer group inline-block" title="Reload Home">
-                    <div class="flex justify-center items-center mb-4">
-                        <!-- RefineBot Icon (Simple SVG) -->
-                    </div>
-                    <h1 class="text-5xl sm:text-6xl font-extrabold text-gray-100 tracking-tight transition-colors duration-300 group-hover:text-cyan-400">
-                        Meet RefineBot
-                    </h1>
-                </div>
-                <p class="mt-4 text-xl text-indigo-400 font-medium">
-                    Your Self-Correcting AI Partner for Flawless Summaries.
-                </p>
-            </header>
-
-            <div class="card p-8 sm:p-12 shadow-2xl">
-                <h2 class="text-3xl font-bold text-gray-100 mb-6 flex items-center">
-                    <span class="text-cyan-400 mr-3">✔</span> How RefineBot Works
-                </h2>
-                <p class="text-lg text-gray-300 mb-6 leading-relaxed">
-                    RefineBot uses a powerful Critique-and-Refine Loop to guarantee high-quality results. It doesn't just create a draft—it actively judges, identifies flaws, and fixes its own work, repeating the process until the summary is perfect.
-                </p>
-
-                <ol class="space-y-4 list-none text-gray-200 mb-8 p-4 bg-gray-900 rounded-xl border border-gray-700">
-                    <li class="grid grid-cols-[8rem_1fr] items-start gap-x-4">
-                        <span class="text-xl font-bold text-indigo-400 mr-4 whitespace-nowrap">1. Draft:</span> Initial summary creation.
-                    </li>
-                    <li class="grid grid-cols-[8rem_1fr] items-start gap-x-4">
-                        <span class="text-xl font-bold text-indigo-400 mr-4 whitespace-nowrap">2. Judge:</span> An independent AI Judge scores the draft (1-10) and provides detailed critique.
-                    </li>
-                    <li class="grid grid-cols-[8rem_1fr] items-start gap-x-4">
-                        <span class="text-xl font-bold text-indigo-400 mr-4 whitespace-nowrap">3. Refine:</span> RefineBot uses the critique to iterate and improve the summary.
-                    </li>
-                </ol>
-
-                <div class="text-center">
-                    <button
-                        onclick="navigateTo('appPage')"
-                        class="px-10 py-4 font-extrabold text-xl rounded-full agent-button"
-                    >
-                        Start Refinement Process
-                    </button>
-                </div>
+         </div>
+      </header>
+      <div class="w-full max-w-7xl mx-auto space-y-12 px-4 sm:px-8 lg:px-16">
+      <div id="homePage" class="hidden">
+         <header class="text-center mb-16 pt-8">
+            <div onclick="navigateTo('homePage')" class="cursor-pointer group inline-block" title="Reload Home">
+               <div class="flex justify-center items-center mb-6">
+                  <img src="{{ url_for('static', filename='logo.png') }}" alt="RefineBot Logo" class="w-20 h-20 transition-transform duration-300 group-hover:scale-105 opacity-80 group-hover:opacity-100">
+               </div>
+               <h1 class="text-5xl sm:text-7xl font-extrabold text-white tracking-tight transition-colors duration-300 group-hover:text-cyan-400">
+                  Meet RefineBot
+               </h1>
             </div>
-        </div>
-
-
-        <!-- ============================================== -->
-        <!-- 2. MAIN APPLICATION PAGE (SUMMARIZER) -->
-        <!-- ============================================== -->
-        <div id="appPage" class="hidden">
-            <!-- Removed mt-6. Relying on body padding. -->
-            <h2 class="text-3xl font-extrabold text-gray-100 tracking-tight mb-6 text-center">
-                Workbench
+            <p class="mt-6 text-2xl text-purple-300 font-light max-w-3xl mx-auto leading-relaxed">
+               Your Self-Correcting AI Partner for Flawless Summaries.
+            </p>
+         </header>
+         <div class="card p-10 sm:p-14 shadow-2xl max-w-4xl mx-auto">
+            <h2 class="text-3xl font-bold text-white mb-8 flex items-center justify-center lg:justify-start">
+               <span class="text-cyan-400 mr-4 text-4xl font-extrabold">✓</span> How RefineBot Works
             </h2>
-
-            <!-- Main Input Card (1. Document & Config) -->
-            <div class="card p-6 sm:p-8 shadow-xl">
-                <h2 class="text-2xl font-semibold mb-4 text-gray-200 flex items-center">
-                    <span class="text-indigo-400 mr-3 text-2xl font-bold">Step 1.  Input Document & Settings</span>
-                </h2>
-                <textarea
-                    id="documentInput"
-                    maxlength="25000"
-                    class="w-full h-48 p-4 border-2 border-gray-600 rounded-xl transition duration-300 resize-none text-gray-100 placeholder:text-gray-500 bg-gray-900"
-                    placeholder="Paste the document you need RefineBot to summarize and perfect."
-                ></textarea>
-
-                <!-- Character Counter -->
-                <div class="text-right text-sm text-gray-400 mt-2">
-                    <span id="charCount" class="font-bold">0</span> / 25,000 characters
-                </div>
-
-                <!-- Action Row -->
-                <div class="mt-6 flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-4 sm:space-y-0 sm:space-x-6">
-                    <!-- Max Steps Input -->
-                    <div class="flex items-center space-x-3">
-                        <label for="maxStepsInput" class="text-base font-medium text-gray-400 whitespace-nowrap flex items-center">
+            <p class="text-lg text-gray-300 mb-8 leading-relaxed">
+               RefineBot uses a powerful **Critique-and-Refine Loop** to guarantee high-quality results. It doesn't just create a draft—it actively judges, identifies flaws, and fixes its own work, repeating the process until the summary is perfect.
+            </p>
+            <ol class="space-y-6 list-none text-gray-200 mb-10 p-6 bg-gray-900/40 rounded-xl border border-gray-700/50">
+               <li class="grid grid-cols-1 md:grid-cols-[8rem_1fr] items-start gap-x-6 gap-y-2">
+                  <span class="text-xl font-bold text-purple-400 whitespace-nowrap">1. Draft:</span> <span class="text-lg">Initial summary creation.</span>
+               </li>
+               <li class="grid grid-cols-1 md:grid-cols-[8rem_1fr] items-start gap-x-6 gap-y-2">
+                  <span class="text-xl font-bold text-purple-400 whitespace-nowrap">2. Judge:</span> <span class="text-lg">An independent AI Judge scores the draft (1-10) and provides detailed critique.</span>
+               </li>
+               <li class="grid grid-cols-1 md:grid-cols-[8rem_1fr] items-start gap-x-6 gap-y-2">
+                  <span class="text-xl font-bold text-purple-400 whitespace-nowrap">3. Refine:</span> <span class="text-lg">RefineBot uses the critique to iterate and improve the summary.</span>
+               </li>
+            </ol>
+            <div class="text-center">
+               <button
+                  onclick="navigateTo('appPage')"
+                  class="px-12 py-5 font-extrabold text-xl rounded-full agent-button"
+                  >
+               Start Refinement Process
+               </button>
+            </div>
+         </div>
+      </div>
+      <div id="appPage" class="hidden">
+         <h2 class="text-4xl font-extrabold text-white tracking-tight mb-10 text-center">
+            RefineBot Workbench
+         </h2>
+         <div class="space-y-12">
+            <div class="card p-8 sm:p-10">
+               <h2 class="text-2xl font-semibold mb-6 text-white flex items-center">
+                  <span class="text-purple-400 mr-4 text-3xl font-bold">1.</span> Input Document & Settings
+               </h2>
+               <textarea
+                  id="documentInput"
+                  maxlength="25000"
+                  class="w-full h-60 p-5 border-2 border-gray-600 rounded-xl
+                  transition duration-300 resize-none text-gray-100
+                  placeholder:text-gray-500 bg-gray-900/60"
+                  placeholder="Paste the document you need RefineBot to summarize and perfect."
+                  ></textarea>
+               <div class="text-right text-sm text-gray-500 mt-3">
+                  <span id="charCount" class="font-bold">0</span> / 25,000 characters
+               </div>
+               <div class="mt-8 flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-6 sm:space-y-0 sm:space-x-8">
+                  <div class="flex items-center space-x-4 flex-shrink">
+                     <label for="maxStepsInput" class="text-lg font-medium text-gray-400 whitespace-nowrap flex items-center">
                         Max Refinements:
-                            <span class="info-container relative ml-2">
-
-                                <svg class="info-icon w-5 h-9" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
-                                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.75.75 0 01.753.75v3a.75.75 0 01-1.5 0v-.256a.75.75 0 00-.75-.75h-.257a.75.75 0 00-.75.75v.256a.75.75 0 01-1.5 0v-3a.75.75 0 01.75-.75h.253a.75.75 0 00.75-.75V9z" clip-rule="evenodd" />
-                                </svg>
-                                <span class="tooltip-text">
-                                    The maximum number of times RefineBot will loop (Draft, Judge, Fix) before stopping. Set to 0 for initial draft only.
-                                </span>
-                            </span>
-                        </label>
-                        <input
-                            type="number"
-                            id="maxStepsInput"
-                            value="3"
-                            min="0"
-                            max="5"
-                            class="w-16 p-2 border border-gray-600 rounded-lg text-center font-bold text-gray-100 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-900"
+                        <span class="info-container relative ml-2">
+                           <p id="refine-description" class="text-sm text-gray-500 whitespace-normal">
+                              The maximum number of times refine will loop.
+                           </p>
+                        </span>
+                     </label>
+                     <input
+                        type="number"
+                        id="maxStepsInput"
+                        value="3"
+                        min="0"
+                        max="5"
+                        class="w-20 p-3 border border-gray-600 rounded-lg text-center font-bold text-gray-100 focus:ring-purple-500 focus:border-purple-500 bg-gray-900/60"
                         />
-                    </div>
-
-                    <!-- Action Button -->
-                    <button
-                        id="summarizeButton"
-                        onclick="runSummarizer()"
-                        type="button"
-                        class="w-full sm:w-auto px-8 py-3 font-extrabold rounded-full disabled:bg-gray-700 disabled:shadow-none disabled:text-gray-400 flex items-center justify-center agent-button"
-                    >
-                        <span id="buttonText">Start RefineBot</span>
-                        <div id="buttonSpinner" class="spinner ml-3 hidden"></div>
-                    </button>
-                </div>
-
-                <!-- Error Alert -->
-                <p id="errorMessage" class="mt-4 p-3 bg-red-900 border border-red-600 text-red-300 rounded-lg hidden font-medium" role="alert">
-                    <span class="font-bold">ERROR:</span> <span id="errorDetails"></span>
-                </p>
+                  </div>
+                  <button
+                     id="summarizeButton"
+                     onclick="runSummarizer()"
+                     type="button"
+                     class="w-full sm:w-auto px-10 py-4 font-extrabold text-lg rounded-full
+                     flex items-center justify-center agent-button"
+                     >
+                     <span id="buttonText">Start RefineBot</span>
+                     <div id="buttonSpinner" class="spinner ml-4 hidden"></div>
+                  </button>
+               </div>
+               <p id="errorMessage" class="mt-6 p-4 bg-red-900/40 border border-red-700 text-red-300 rounded-lg hidden font-medium" role="alert">
+                  <span class="font-bold">ERROR:</span> <span id="errorDetails"></span>
+               </p>
             </div>
-
-            <!-- Output Card (2. Results & Metrics) -->
-            <div class="card p-6 sm:p-8 shadow-xl">
-                <h2 class="text-2xl font-semibold mb-4 text-gray-200 flex items-center">
-                    <span class="text-indigo-400 mr-3 text-2xl font-bold">Step 2.  Final Summary & Metrics</span>
-                </h2>
-
-                <!-- Summary Output -->
-                <div class="mb-6 border-b border-gray-700 pb-4">
-                    <h3 class="text-sm font-bold text-gray-300 mb-1 uppercase tracking-wider">
+            <div class="lg:grid lg:grid-cols-2 lg:gap-12 xl:gap-16">
+               <div class="card p-8 sm:p-10 mb-12 lg:mb-0">
+                  <h2 class="text-2xl font-semibold mb-6 text-white flex items-center">
+                     <span class="text-purple-400 mr-4 text-3xl font-bold">2.</span> Final Summary & Metrics
+                  </h2>
+                  <div class="mb-8 border-b border-gray-700/50 pb-6">
+                     <h3 class="text-base font-bold text-gray-300 mb-2 uppercase tracking-wider">
                         Final Refined Summary
-                    </h3>
-                    <div id="finalSummary" class="text-sm text-gray-300 italic bg-gray-900 p-3 rounded-lg border border-gray-700 min-h-[4rem]">
+                     </h3>
+                     <div id="finalSummary" class="text-lg text-gray-200 italic
+                        bg-gray-900/40 p-5 rounded-lg
+                        border border-gray-700/50 min-h-[8rem] leading-relaxed">
                         RefineBot is ready to summarize your text.
-                    </div>
-                </div>
-
-                <!-- Metrics and Feedback -->
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
-
-                    <!-- Judge Score (Enhanced Badge) -->
-                    <div class="col-span-1 flex flex-col items-center justify-center">
-                        <h3 class="text-sm font-bold text-gray-300 mb-2 uppercase tracking-wider">Judge Score</h3>
-                        <div id="scoreBadge" class="w-24 h-24 flex items-center justify-center rounded-full transition-colors duration-500 shadow-xl bg-gray-400">
-                            <p id="finalScore" class="text-3xl font-extrabold text-white">N/A</p>
+                     </div>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-4 gap-8 items-start">
+                     <div class="col-span-1 flex flex-col items-center justify-center">
+                        <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase tracking-wider">Judge Score</h3>
+                        <div id="scoreBadge" class="w-28 h-28 flex items-center justify-center rounded-full
+                           transition-colors duration-500 shadow-xl bg-gray-600">
+                           <p id="finalScore" class="text-4xl font-extrabold text-white">N/A</p>
                         </div>
-                        <p class="text-xs text-gray-500 mt-1">Quality (1-10)</p>
-                    </div>
-
-                    <!-- Refinement Steps -->
-                    <div class="col-span-1 text-center mt-4 md:mt-0">
-                        <h3 class="text-sm font-bold text-gray-300 mb-1 uppercase tracking-wider">Total Fixes</h3>
-                        <p id="stepsTaken" class="text-4xl font-extrabold text-indigo-400 transition-all duration-300">0</p>
+                        <p class="text-xs text-gray-500 mt-2">Quality (1-10)</p>
+                     </div>
+                     <div class="col-span-1 text-center mt-4 md:mt-0">
+                        <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase tracking-wider">Total Fixes</h3>
+                        <p id="stepsTaken" class="text-5xl font-extrabold text-purple-400 transition-all duration-300">0</p>
                         <p class="text-xs text-gray-500">Self-Correction Loops</p>
-                    </div>
-
-                    <!-- Final Critique -->
-                    <div class="md:col-span-2 mt-4 md:mt-0">
-                        <h3 class="text-sm font-bold text-gray-300 mb-1 uppercase tracking-wider">Final Critique Summary</h3>
-                        <p id="finalCritique" class="text-sm text-gray-300 italic bg-gray-900 p-3 rounded-lg border border-gray-700 min-h-[4rem]">The Judge has not yet evaluated the final output.</p>
-                    </div>
-                </div>
-
-                <!-- Process Log (Styled) -->
-                <div class="mt-8 pt-6 border-t border-gray-700">
-                    <h3 class="text-lg font-bold text-gray-200 mb-2 flex items-center">
-                        <span class="text-indigo-400 mr-3 text-xl font-bold">3.</span> RefineBot's Log
-                    </h3>
-                    <!-- Log uses a dedicated dark background for high contrast messages -->
-                    <div id="processLog" class="bg-gray-900 text-gray-200 text-sm p-4 rounded-xl font-mono overflow-auto h-40 border-2 border-gray-700">
-                        <div class="log-entry">[SYSTEM] Initializing RefineBot systems... Ready to proceed.</div>
-                    </div>
-                </div>
+                     </div>
+                     <div class="md:col-span-2 mt-4 md:mt-0">
+                        <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase tracking-wider">Final Critique Summary</h3>
+                        <p id="finalCritique" class="text-base text-gray-300 italic
+                           bg-gray-900/40 p-4 rounded-lg
+                           border border-gray-700/50 min-h-[6rem] leading-normal">The Judge has not yet evaluated the final output.</p>
+                     </div>
+                  </div>
+               </div>
+               <div class="card p-8 sm:p-10">
+                  <h2 class="text-2xl font-semibold mb-6 text-white flex items-center">
+                     <span class="text-purple-400 mr-4 text-3xl font-bold">3.</span> RefineBot's Log
+                  </h2>
+                  <div id="processLog" class="bg-gray-900/40 text-gray-300 text-sm p-6
+                     rounded-xl font-mono overflow-auto h-56
+                     border-2 border-gray-700/50 leading-relaxed">
+                     <div class="log-entry">[SYSTEM] Initializing RefineBot systems... Ready to proceed.</div>
+                  </div>
+               </div>
             </div>
-        </div>
+         </div>
+      </div>
+      <footer class="py-12 mt-16 text-center text-gray-600 text-sm border-t border-gray-700/50">
+         &copy; 2025 RefineBot. Powered by Gemini. All rights reserved.
+      </footer>
+      <script>
+         // Note: Keep the API URL consistent with your Flask backend URL:
+         const API_URL = '/summarize';
+         const LOG_MAX_LINES = 15;
 
-        <footer class="py-8 mt-12 text-center text-gray-500 text-sm border-t border-gray-700">
-            &copy; 2025 RefineBot. Powered by Gemini. All rights reserved.
-        </footer>
+         const elements = {
+             // Navigation Elements
+             homePage: document.getElementById('homePage'),
+             appPage: document.getElementById('appPage'),
+             fixedHeader: document.getElementById('fixedHeader'),
+             headerHomeButton: document.getElementById('headerHomeButton'),
+             headerHomePlaceholder: document.getElementById('headerHomePlaceholder'),
+             fixedHeaderTitle: document.getElementById('fixedHeaderTitle'),
 
-        <!-- JavaScript Logic -->
-        <script>
-            // Note: Keep the API URL consistent with your Flask backend URL.
-            const API_URL = 'https://ai-chatbot-83je.onrender.com/summarize';
-            const LOG_MAX_LINES = 15;
+             // App Page Elements
+             button: document.getElementById('summarizeButton'),
+             buttonText: document.getElementById('buttonText'),
+             buttonSpinner: document.getElementById('buttonSpinner'),
+             inputArea: document.getElementById('documentInput'),
+             maxStepsInput: document.getElementById('maxStepsInput'),
+             errorMessage: document.getElementById('errorMessage'),
+             errorDetails: document.getElementById('errorDetails'),
+             finalSummary: document.getElementById('finalSummary'),
+             stepsTaken: document.getElementById('stepsTaken'),
+             finalScore: document.getElementById('finalScore'),
+             scoreBadge: document.getElementById('scoreBadge'),
+             finalCritique: document.getElementById('finalCritique'),
+             processLog: document.getElementById('processLog'),
+             charCount: document.getElementById('charCount'),
+         }
 
-            const elements = {
-                // Navigation Elements
-                homePage: document.getElementById('homePage'),
-                appPage: document.getElementById('appPage'),
-                fixedHeader: document.getElementById('fixedHeader'),
-                headerHomeButton: document.getElementById('headerHomeButton'),
-                headerHomePlaceholder: document.getElementById('headerHomePlaceholder'),
-                fixedHeaderTitle: document.getElementById('fixedHeaderTitle'),
+         // --- CRITICAL CHANGE: HISTORY API ROUTING LOGIC (Clean URLs) ---
 
-                // App Page Elements
-                button: document.getElementById('summarizeButton'),
-                buttonText: document.getElementById('buttonText'),
-                buttonSpinner: document.getElementById('buttonSpinner'),
-                inputArea: document.getElementById('documentInput'),
-                maxStepsInput: document.getElementById('maxStepsInput'),
-                errorMessage: document.getElementById('errorMessage'),
-                errorDetails: document.getElementById('errorDetails'),
-                finalSummary: document.getElementById('finalSummary'),
-                stepsTaken: document.getElementById('stepsTaken'),
-                finalScore: document.getElementById('finalScore'),
-                scoreBadge: document.getElementById('scoreBadge'),
-                finalCritique: document.getElementById('finalCritique'),
-                processLog: document.getElementById('processLog'),
-                charCount: document.getElementById('charCount'),
-            }
+         // This function now uses the History API to change the URL without a page reload or a hash
+         function navigateTo(pageId) {
+             // Map the page ID to a clean path
+             const newPath = (pageId === 'homePage' ? '/' : `/${pageId}`);
 
-            // --- NAVIGATION LOGIC ---
+             // Use History API for clean URLs: pushState(state, title, url)
+             history.pushState({ page: pageId }, '', newPath);
 
-            // This function now just sets the URL hash
-            function navigateTo(pageId) {
-                location.hash = pageId;
-            }
+             // Manually call the handler since pushState doesn't fire popstate
+             handlePathChange();
+         }
 
-            // This new function handles showing/hiding pages based on the hash
-            function handleHashChange() {
-                const pageId = location.hash.substring(1); // Get hash value without the '#'
+         // This new function handles showing/hiding pages based on the clean URL path
+         function handlePathChange() {
+             // Get the current path (e.g., '/', '/appPage', '/some/other/path')
+             const path = window.location.pathname;
 
-                elements.homePage.classList.add('hidden');
-                elements.appPage.classList.add('hidden');
+             // Determine the page ID from the path
+             let currentPageId;
 
-                // Set default/home state
-                let currentPageId = 'homePage';
+             if (path === '/') {
+                 currentPageId = 'homePage';
+             } else if (path === '/appPage') {
+                 currentPageId = 'appPage';
+             } else {
+                 // Fallback for an unknown path (e.g., /invalid). Redirect to home.
+                 currentPageId = 'homePage';
+                 // Replace the bad URL with the correct one without pushing a new history state
+                 history.replaceState({ page: currentPageId }, '', '/');
+             }
 
-                if (pageId === 'appPage') {
-                    currentPageId = 'appPage';
-                    elements.appPage.classList.remove('hidden');
-                    elements.headerHomeButton.classList.remove('hidden');
-                    elements.headerHomePlaceholder.classList.add('hidden');
+             // --- Page Visibility Logic ---
+             elements.homePage.classList.add('hidden');
+             elements.appPage.classList.add('hidden');
 
-                    elements.fixedHeaderTitle.textContent = 'RefineBot Workbench';
+             if (currentPageId === 'appPage') {
+                 elements.appPage.classList.remove('hidden');
+                 elements.headerHomeButton.classList.remove('hidden');
+                 elements.headerHomePlaceholder.classList.add('hidden');
 
-                    resetAppPage(); // Reset the workbench every time you navigate to it
-                    document.title = 'RefineBot: Workbench';
+                 elements.fixedHeaderTitle.textContent = 'RefineBot';
 
-                } else {
-                    elements.homePage.classList.remove('hidden');
-                    elements.headerHomeButton.classList.add('hidden');
-                    elements.headerHomePlaceholder.classList.remove('hidden');
+                 resetAppPage();
+                 document.title = 'RefineBot: Workbench';
 
-                    elements.fixedHeaderTitle.textContent = 'RefineBot';
+             } else {
+                 elements.homePage.classList.remove('hidden');
+                 elements.headerHomeButton.classList.add('hidden');
+                 elements.headerHomePlaceholder.classList.remove('hidden');
 
-                    document.title = 'RefineBot: Home';
-                }
-            }
+                 elements.fixedHeaderTitle.textContent = 'RefineBot';
 
-            // --- Function to reset the workbench page ---
-            function resetAppPage() {
-                // Clear inputs
-                elements.inputArea.value = '';
-                elements.maxStepsInput.value = '3';
+                 document.title = 'RefineBot: Home';
+             }
 
-                // Reset output fields
-                elements.finalSummary.textContent = 'RefineBot is ready to summarize your text.';
-                elements.stepsTaken.textContent = '0';
-                elements.finalCritique.textContent = 'The Judge has not yet evaluated the final output.';
+             // Scroll to the top of the content area for a smooth transition
+             window.scrollTo({ top: 0, behavior: 'smooth' });
+         }
 
-                // Reset score badge
-                updateScoreBadge('N/A');
+         // Listen for changes in the URL path (only fired by back/forward buttons)
+         window.addEventListener('popstate', handlePathChange);
 
-                // Clear logs and errors
-                elements.processLog.innerHTML = '<div class="log-entry">[SYSTEM] Workbench reset. Ready for new task.</div>';
-                elements.errorMessage.classList.add('hidden');
+         // Initial load handler
+         window.addEventListener('DOMContentLoaded', () => {
+             // On initial load, set the initial history state and run the handler
+             if (window.location.pathname === '/') {
+                 history.replaceState({ page: 'homePage' }, '', '/');
+             } else if (window.location.pathname === '/appPage') {
+                 history.replaceState({ page: 'appPage' }, '', '/appPage');
+             }
+             handlePathChange();
+         });
 
-                // Reset char count
-                updateCharCount();
+         // --- END CRITICAL CHANGE ---
 
-                // Ensure UI is in ready state (if it was stuck in loading)
-                updateUI('ready');
-            }
+         // --- Function to reset the workbench page ---
+         function resetAppPage() {
+             // Clear inputs
+             elements.inputArea.value = '';
+             elements.maxStepsInput.value = '3';
 
-            // --- Character Counter Logic ---
-            function updateCharCount() {
-                const input = elements.inputArea.value.length;
-                const max = elements.inputArea.maxLength;
+             // Reset output fields
+             elements.finalSummary.textContent = 'RefineBot is ready to summarize your text.';
+             elements.stepsTaken.textContent = '0';
+             elements.finalCritique.textContent = 'The Judge has not yet evaluated the final output.';
 
-                elements.charCount.textContent = input.toLocaleString();
+             // Reset score badge
+             updateScoreBadge('N/A');
 
-                if (input > max * 0.9) {
-                    elements.charCount.classList.add('text-red-400', 'font-extrabold');
-                    elements.charCount.classList.remove('text-indigo-400');
-                } else if (input > max * 0.5) {
-                    elements.charCount.classList.add('text-indigo-400');
-                    elements.charCount.classList.remove('text-red-400');
-                } else {
-                    elements.charCount.classList.remove('text-red-4Two', 'text-indigo-400', 'font-extrabold');
-                }
-            }
+             // Clear logs and errors
+             elements.processLog.innerHTML = '<div class="log-entry">[SYSTEM] Workbench reset. Ready for new task.</div>';
+             elements.errorMessage.classList.add('hidden');
 
-            elements.inputArea?.addEventListener('input', updateCharCount);
+             // Reset char count
+             updateCharCount();
 
-            // --- Core App UI and Logic Functions ---
+             // Ensure UI is in ready state (if it was stuck in loading)
+             updateUI('ready');
+         }
 
-            function addToLog(message, type = 'INFO') {
-                const log = elements.processLog;
+         // --- Character Counter Logic ---
+         function updateCharCount() {
+             const input = elements.inputArea.value.length;
+             const max = elements.inputArea.maxLength;
 
-                const now = new Date();
-                const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+             elements.charCount.textContent = input.toLocaleString();
 
-                const newLine = document.createElement('div');
-                newLine.className = `log-entry whitespace-pre-wrap text-sm`;
+             if (input > max * 0.9) {
+                 elements.charCount.classList.add('text-red-400', 'font-extrabold');
+                 elements.charCount.classList.remove('text-indigo-400');
+             } else if (input > max * 0.5) {
+                 elements.charCount.classList.add('text-purple-400'); /* Changed from indigo */
+                 elements.charCount.classList.remove('text-red-400');
+             } else {
+                 elements.charCount.classList.remove('text-red-400', 'text-purple-400', 'font-extrabold'); /* Changed from indigo */
+             }
+         }
 
-                let textColor = 'text-gray-300';
-                if (type === 'ERROR') textColor = 'text-red-400 font-bold';
-                else if (type === 'SUCCESS') textColor = 'text-green-400 font-bold';
-                else if (type === 'CRITIQUE') textColor = 'text-yellow-400 italic';
-                else if (type === 'ACTION') textColor = 'text-cyan-400 font-medium'; // Cyan for action
+         elements.inputArea?.addEventListener('input', updateCharCount);
 
-                // Log background is dark, so text colors are bright/vibrant
-                newLine.innerHTML = `<span class="text-gray-500">[${timeStr}]</span> <span class="${textColor}">${message}</span>`;
+         // --- Core App UI and Logic Functions ---
 
-                log.prepend(newLine);
+         function addToLog(message, type = 'INFO') {
+             const log = elements.processLog;
 
-                while (log.children.length > LOG_MAX_LINES) {
-                    log.removeChild(log.lastChild);
-                }
-            }
+             const now = new Date();
+             const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-            function updateScoreBadge(score) {
-                const badge = elements.scoreBadge;
-                badge.className = "w-24 h-24 flex items-center justify-center rounded-full transition-colors duration-500 shadow-xl";
+             const newLine = document.createElement('div');
+             newLine.className = `log-entry whitespace-pre-wrap text-sm`;
 
-                if (score === 'N/A' || score === 'ERR' || score === '...') {
-                    badge.classList.add('bg-gray-600', 'shadow-gray-700/50');
-                } else if (score >= 8) {
-                    badge.classList.add('bg-green-600', 'shadow-green-500/50');
-                } else if (score >= 5) {
-                    badge.classList.add('bg-yellow-600', 'shadow-yellow-500/50');
-                } else {
-                    badge.classList.add('bg-red-600', 'shadow-red-500/50');
-                }
-                elements.finalScore.textContent = score;
-            }
+             let textColor = 'text-gray-300';
+             if (type === 'ERROR') textColor = 'text-red-400 font-bold';
+             else if (type === 'SUCCESS') textColor = 'text-green-400 font-bold';
+             else if (type === 'CRITIQUE') textColor = 'text-yellow-400 italic';
+             else if (type === 'ACTION') textColor = 'text-cyan-400 font-medium'; // Cyan for action
 
-            function updateUI(status, details = '', currentStep = '') {
-                elements.errorMessage.classList.add('hidden');
+             // Log background is dark, so text colors are bright/vibrant
+             newLine.innerHTML = `<span class="text-gray-500">[${timeStr}]</span> <span class="${textColor}">${message}</span>`;
 
-                if (status === 'loading') {
-                    elements.button.disabled = true;
-                    elements.inputArea.disabled = true;
-                    elements.maxStepsInput.disabled = true;
+             log.prepend(newLine);
 
-                    elements.buttonText.textContent = currentStep || 'RefineBot is Busy...';
-                    elements.buttonSpinner.classList.remove('hidden');
+             while (log.children.length > LOG_MAX_LINES) {
+                 log.removeChild(log.lastChild);
+             }
+         }
 
-                    if (currentStep.includes("Refining")) {
-                         // Use cyan for the focus animation
-                         elements.finalSummary.classList.add('border-cyan-400', 'ring-2', 'ring-cyan-400', 'animate-pulse');
-                    } else {
-                         elements.finalSummary.classList.remove('border-cyan-400', 'ring-2', 'ring-cyan-400', 'animate-pulse');
-                    }
-                    elements.finalSummary.textContent = "RefineBot is actively processing and self-correcting the document...";
-                    elements.finalCritique.textContent = 'Judge is active, standing by for evaluation...';
-                    updateScoreBadge('...');
+         function updateScoreBadge(score) {
+             const badge = elements.scoreBadge;
+             badge.className = "w-28 h-28 flex items-center justify-center rounded-full transition-colors duration-500 shadow-xl"; /* Larger badge */
 
-                } else if (status === 'ready') {
-                    elements.button.disabled = false;
-                    elements.inputArea.disabled = false;
-                    elements.maxStepsInput.disabled = false;
+             if (score === 'N/A' || score === 'ERR' || score === '...') {
+                 badge.classList.add('bg-gray-600', 'shadow-gray-700/50');
+             } else if (score >= 8) {
+                 badge.classList.add('bg-green-600', 'shadow-green-500/50');
+             } else if (score >= 5) {
+                 badge.classList.add('bg-yellow-600', 'shadow-yellow-500/50');
+             } else {
+                 badge.classList.add('bg-red-600', 'shadow-red-500/50');
+             }
+             elements.finalScore.textContent = score;
+         }
 
-                    elements.buttonText.textContent = 'Start RefineBot';
-                    elements.buttonSpinner.classList.add('hidden');
-                    elements.finalSummary.classList.remove('border-cyan-400', 'ring-2', 'ring-cyan-400', 'animate-pulse');
+         function updateUI(status, details = '', currentStep = '') {
+             elements.errorMessage.classList.add('hidden');
 
-                    if (details !== 'error') {
-                        // Only add success log if it's not an error recovery
-                        if(elements.finalScore.textContent !== 'ERR') {
-                            addToLog("RefineBot process complete. Final result displayed.", 'SUCCESS');
-                        }
-                    }
+             if (status === 'loading') {
+                 elements.button.disabled = true;
+                 elements.inputArea.disabled = true;
+                 elements.maxStepsInput.disabled = true;
 
-                } else if (status === 'error') {
-                    elements.errorDetails.textContent = details;
-                    elements.errorMessage.classList.remove('hidden');
-                    elements.finalSummary.textContent = "RefineBot encountered an error. Please check your document and API connection.";
-                    elements.finalCritique.textContent = "RefineBot requires system checks. Check server logs.";
-                    updateScoreBadge('ERR');
-                    addToLog(`FATAL ERROR: ${details}`, 'ERROR');
-                    updateUI('ready', 'error');
-                }
-            }
+                 elements.buttonText.textContent = currentStep || 'RefineBot is Busy...';
+                 elements.buttonSpinner.classList.remove('hidden');
 
-            async function runSummarizer() {
-                const documentText = elements.inputArea.value.trim();
-                const maxSteps = parseInt(elements.maxStepsInput.value, 10);
+                 if (currentStep.includes("Refining")) {
+                      // Use cyan for the focus animation
+                      elements.finalSummary.classList.add('border-cyan-400', 'ring-2', 'ring-cyan-400', 'animate-pulse');
+                 } else {
+                      elements.finalSummary.classList.remove('border-cyan-400', 'ring-2', 'ring-cyan-400', 'animate-pulse');
+                 }
+                 elements.finalSummary.textContent = "RefineBot is actively processing and self-correcting the document...";
+                 elements.finalCritique.textContent = 'Judge is active, standing by for evaluation...';
+                 updateScoreBadge('...');
 
-                elements.processLog.innerHTML = ''; // Clear log on start
+             } else if (status === 'ready') {
+                 elements.button.disabled = false;
+                 elements.inputArea.disabled = false;
+                 elements.maxStepsInput.disabled = false;
 
-                if (!documentText || documentText.length < 100) {
-                    elements.errorDetails.textContent = "RefineBot requires a document of at least 100 characters to start the process.";
-                    elements.errorMessage.classList.remove('hidden');
-                    return;
-                }
+                 elements.buttonText.textContent = 'Start RefineBot';
+                 elements.buttonSpinner.classList.add('hidden');
+                 elements.finalSummary.classList.remove('border-cyan-400', 'ring-2', 'ring-cyan-400', 'animate-pulse');
 
-                updateUI('loading', '', 'Initial Draft in Progress...');
-                addToLog(`RefineBot activated. Max fix loops set to ${maxSteps}.`, 'INFO');
-                elements.stepsTaken.textContent = '0';
-                updateScoreBadge('...');
+                 if (details !== 'error') {
+                     // Only add success log if it's not an error recovery
+                     if(elements.finalScore.textContent !== 'ERR') {
+                         addToLog("RefineBot process complete. Final result displayed.", 'SUCCESS');
+                     }
+                 }
 
-                try {
-                    const response = await fetch(API_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            document: documentText,
-                            max_refinement_steps: maxSteps
-                        }),
-                    });
+             } else if (status === 'error') {
+                 elements.errorDetails.textContent = details;
+                 elements.errorMessage.classList.remove('hidden');
+                 elements.finalSummary.textContent = "RefineBot encountered an error. Please check your document and API connection.";
+                 elements.finalCritique.textContent = "RefineBot requires system checks. Check server logs.";
+                 updateScoreBadge('ERR');
+                 addToLog(`FATAL ERROR: ${details}`, 'ERROR');
+                 updateUI('ready', 'error');
+             }
+         }
 
-                    if (!response.ok) {
-                        let errorDetail = `HTTP error! status: ${response.status}`;
-                        try {
-                            const errorData = await response.json();
-                            errorDetail = errorData.error || errorDetail;
-                        } catch (e) {
-                            errorDetail = `${response.statusText} (${response.status})`;
-                        }
-                        throw new Error(errorDetail);
-                    }
+         async function runSummarizer() {
+             const documentText = elements.inputArea.value.trim();
+             const maxSteps = parseInt(elements.maxStepsInput.value, 10);
 
-                    const data = await response.json();
+             if (!documentText) {
+                 updateUI('error', 'Please paste a document into the input field to begin.');
+                 return;
+             }
 
-                    // --- Dynamic Log Update during the loop ---
-                    if (data.full_execution_log && Array.isArray(data.full_execution_log)) {
-                        data.full_execution_log.forEach(logEntry => {
-                            if (logEntry.node_name === 'summarize') {
-                                addToLog(`[DRAFTING] Creating initial summary draft.`, 'ACTION');
-                            } else if (logEntry.node_name === 'judge') {
-                                const score = logEntry.result?.score || 'N/A';
-                                const action = logEntry.result?.should_refine ? 'FAIL (Requires Fix)' : 'PASS (Finalizing)';
-                                addToLog(`[JUDGE L${logEntry.loop_count}] Critique Received (Score: ${score}/10, Decision: ${action})`, 'CRITIQUE');
-                                updateUI('loading', '', `Judge Evaluation (Loop ${logEntry.loop_count})`);
-                            } else if (logEntry.node_name === 'refine') {
-                                addToLog(`[REFINING L${logEntry.loop_count}] Executing fixes based on Judge's feedback.`, 'ACTION');
-                                updateUI('loading', '', `Refining Summary (Loop ${logEntry.loop_count})`);
-                            }
-                        });
-                    }
+             // Clear previous results and logs before starting a new run
+             resetAppPage();
 
-                    // --- Final UI Update ---
-                    elements.finalSummary.textContent = data.final_summary || 'N/A';
-                    elements.stepsTaken.textContent = data.refinement_steps_taken.toString();
+             // Add initial log entry (which would have been wiped by reset)
+             addToLog(`Starting refinement process with ${maxSteps} maximum steps.`, 'INFO');
 
-                    const judgeResult = data.final_judge_result || {};
-                    const score = judgeResult.score;
-                    elements.finalCritique.textContent = judgeResult.critique || 'The summary passed its final review with no required fixes.';
+             updateUI('loading', '', 'Drafting Initial Summary...');
 
-                    updateScoreBadge(score);
+             try {
+                 const payload = {
+                     document_text: documentText,
+                     max_steps: maxSteps
+                 };
 
-                } catch (error) {
-                    console.error("Fetch error:", error);
-                    updateUI('error', error.message || "Could not connect to the API. Check your browser/server consoles.");
-                } finally {
-                    updateUI('ready');
-                }
-            }
+                 const response = await fetch(API_URL, {
+                     method: 'POST',
+                     headers: {
+                         'Content-Type': 'application/json'
+                     },
+                     body: JSON.stringify(payload)
+                 });
 
-            // --- INITIALIZATION LOGIC ---
-            document.addEventListener('DOMContentLoaded', () => {
-                elements.inputArea.maxLength = 25000;
-                // Add event listener only if the element exists to prevent errors
-                if (elements.inputArea) {
-                     elements.inputArea.addEventListener('input', updateCharCount);
-                     updateCharCount(); // Initial count
-                }
+                 if (!response.ok) {
+                     const errorData = await response.json();
+                     throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                 }
 
-                // Add listener for hash changes
-                window.addEventListener('hashchange', handleHashChange);
+                 const result = await response.json();
 
-                // Run on load to set the initial page
-                // Check if hash exists, otherwise default to homePage
-                if (!location.hash || location.hash === '#') {
-                    navigateTo('homePage');
-                } else {
-                    handleHashChange();
-                }
-            });
-        </script>
-    </div>
+                 // --- Process Log Entries during streaming/step-by-step update (Assuming a full result is returned here) ---
 
-</body>
+                 let finalSummaryText = result.final_summary || 'No summary returned.';
+                 let finalCritiqueText = 'No critique returned.';
+                 let finalScoreValue = 'N/A';
+                 let stepsTakenValue = result.steps_taken || 0;
+
+                 // Display all process logs
+                 result.process_log.forEach(logEntry => {
+                     // The server response structure is assumed to be:
+                     // {step: 1, type: "CRITIQUE", detail: "..."}
+                     let logType = 'INFO';
+                     if(logEntry.type) {
+                        logType = logEntry.type.toUpperCase();
+                     }
+                     addToLog(logEntry.detail, logType);
+
+                     // Capture final state from the last entry
+                     if (logType === 'CRITIQUE') {
+                         finalCritiqueText = logEntry.detail;
+                         // Attempt to extract score from detail if available in the last critique
+                         const scoreMatch = logEntry.detail.match(/Score:\s*(\d+)/i);
+                         if (scoreMatch && scoreMatch[1]) {
+                             finalScoreValue = parseInt(scoreMatch[1], 10);
+                         }
+                     } else if (logType === 'SUMMARY') {
+                         // Assuming the last summary log is the final one
+                         finalSummaryText = logEntry.detail;
+                     }
+                 });
+
+                 // Update Final Metrics Section
+                 elements.stepsTaken.textContent = stepsTakenValue;
+                 elements.finalSummary.textContent = finalSummaryText;
+                 elements.finalCritique.textContent = finalCritiqueText;
+
+                 // Final score badge update
+                 if (typeof finalScoreValue === 'number' && !isNaN(finalScoreValue)) {
+                     updateScoreBadge(finalScoreValue);
+                 } else {
+                     updateScoreBadge('N/A');
+                 }
+
+                 updateUI('ready');
+
+             } catch (error) {
+                 console.error("RefineBot Run Error:", error);
+                 updateUI('error', error.message || 'An unknown error occurred during the API call.');
+             }
+         }
+
+         // --- Tooltip Logic (Unchanged but ensuring it is functional) ---
+         document.querySelectorAll('.info-container').forEach(container => {
+             const icon = container.querySelector('.info-icon');
+             const tooltip = container.querySelector('.tooltip-text');
+
+             if (tooltip) {
+                 // Initial positioning for the tooltip (off-screen or hidden)
+                 tooltip.style.position = 'absolute';
+                 tooltip.style.visibility = 'hidden';
+                 tooltip.style.opacity = '0';
+                 tooltip.style.zIndex = '50';
+                 tooltip.style.width = '200px';
+                 tooltip.style.padding = '8px 12px';
+                 tooltip.style.borderRadius = '0.5rem';
+                 tooltip.style.left = '50%';
+                 tooltip.style.top = '100%';
+                 tooltip.style.transform = 'translate(-50%, 10px)';
+                 tooltip.style.transition = 'opacity 0.2s, transform 0.2s';
+
+                 // Create an arrow (pseudo-element equivalent)
+                 const arrow = document.createElement('div');
+                 arrow.className = 'absolute h-0 w-0 border-8 border-transparent';
+                 arrow.style.top = '-8px';
+                 arrow.style.left = '50%';
+                 arrow.style.transform = 'translateX(-50%)';
+                 arrow.style.borderBottomColor = '#374151'; // Match tooltip background
+                 tooltip.appendChild(arrow);
+             }
+
+             const showTooltip = () => {
+                 if (tooltip) {
+                     tooltip.style.visibility = 'visible';
+                     tooltip.style.opacity = '1';
+                     tooltip.style.transform = 'translate(-50%, 0)';
+                 }
+             };
+
+             const hideTooltip = () => {
+                 if (tooltip) {
+                     tooltip.style.opacity = '0';
+                     tooltip.style.transform = 'translate(-50%, 10px)';
+                     // Use a slight delay before hiding completely to allow transition to finish
+                     setTimeout(() => {
+                          if(tooltip.style.opacity === '0') {
+                             tooltip.style.visibility = 'hidden';
+                          }
+                     }, 200);
+                 }
+             };
+
+             icon?.addEventListener('mouseenter', showTooltip);
+             icon?.addEventListener('mouseleave', hideTooltip);
+             icon?.addEventListener('focus', showTooltip);
+             icon?.addEventListener('blur', hideTooltip);
+             container.addEventListener('touchstart', (e) => {
+                 e.preventDefault();
+                 if (tooltip.style.opacity === '1') {
+                     hideTooltip();
+                 } else {
+                     // Hide any other active tooltips before showing this one
+                     document.querySelectorAll('.tooltip-text').forEach(t => {
+                         if (t !== tooltip) {
+                             t.style.opacity = '0';
+                             setTimeout(() => t.style.visibility = 'hidden', 200);
+                         }
+                     });
+                     showTooltip();
+                 }
+             });
+         });
+
+
+      </script>
+   </body>
 </html>

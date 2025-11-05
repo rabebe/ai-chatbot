@@ -49,6 +49,21 @@ def serve_index():
     return render_template("index.html")
 
 
+@app.route("/<path:path>", methods=["GET"])
+def serve_app_routes(path):
+    """
+    Catch-all route to serve the SPA's main HTML file for any client-side route.
+    This fixes direct navigation and refreshes on URLs like /appPage.
+    """
+    # Exclude requests for static files that Flask handles automatically
+    # (though Flask's built-in static handling often handles this exclusion)
+    # We simply return the index.html for all non-defined paths.
+    return render_template("index.html")
+
+
+# --- END NEW CATCH-ALL ROUTE ---
+
+
 @app.route("/summarize", methods=["POST"])
 def summarize_document():
     """
