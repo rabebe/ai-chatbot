@@ -148,7 +148,12 @@ def refinement_node(state: AgentState) -> Dict[str, Any]:
             ).score,
             should_refine=False,
         )
-        return {"judge_result": judge_result, "refinement_count": refinement_count}
+        # IMPORTANT: Return both judge_result AND summary_draft to ensure state is complete
+        return {
+            "judge_result": judge_result,
+            "refinement_count": refinement_count,
+            "summary_draft": summary_draft,
+        }
 
     # Prepare the prompt
     prompt = ChatPromptTemplate.from_messages(
@@ -181,7 +186,12 @@ def refinement_node(state: AgentState) -> Dict[str, Any]:
         judge_result = JudgeResult(
             critique=f"Refiner failed: {e}", score=0, should_refine=False
         )
-        return {"judge_result": judge_result, "refinement_count": refinement_count}
+        # IMPORTANT: Return both judge_result AND summary_draft for clean termination
+        return {
+            "judge_result": judge_result,
+            "refinement_count": refinement_count,
+            "summary_draft": summary_draft,
+        }
 
 
 def judge_node(state: AgentState) -> Dict[str, Any]:
@@ -222,8 +232,8 @@ def judge_node(state: AgentState) -> Dict[str, Any]:
             f"Judge decision: Score={result.score}, Refine={result.should_refine}"
         )
 
-        # Update the state
-        return {"judge_result": result}
+        # FIX: Always return the summary_draft alongside the judge_result
+        return {"judge_result": result, "summary_draft": summary_draft}
 
     except (
         OutputParserException,
@@ -242,7 +252,8 @@ def judge_node(state: AgentState) -> Dict[str, Any]:
             score=0,
             should_refine=False,
         )
-        return {"judge_result": fallback_result}
+        # FIX: Always return the summary_draft alongside the fallback judge_result
+        return {"judge_result": fallback_result, "summary_draft": summary_draft}
 
 
 # --- Conditional Edges ---

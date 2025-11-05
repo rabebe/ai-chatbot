@@ -24,13 +24,13 @@ from src.core.document_processor import process_document  # noqa: E402
 # Calculate the absolute paths to the templates and static folders
 script_dir = os.path.dirname(os.path.abspath(__file__))
 template_path = os.path.join(script_dir, "templates")
-static_path = os.path.join(script_dir, "static")  # <-- THIS IS THE PATH FOR YOUR LOGO
+static_path = os.path.join(script_dir, "static")
 
 # Initialize Flask app
 app = Flask(
     __name__,
     template_folder=template_path,
-    static_folder=static_path,  # <-- THIS TELLS FLASK WHERE TO FIND 'logo.png'
+    static_folder=static_path,
 )
 
 logger.info(f"Flask template folder set to: {app.template_folder}")
@@ -53,22 +53,15 @@ def serve_index():
 def serve_app_routes(path):
     """
     Catch-all route to serve the SPA's main HTML file for any client-side route.
-    This fixes direct navigation and refreshes on URLs like /appPage.
     """
-    # Exclude requests for static files that Flask handles automatically
-    # (though Flask's built-in static handling often handles this exclusion)
-    # We simply return the index.html for all non-defined paths.
     return render_template("index.html")
-
-
-# --- END NEW CATCH-ALL ROUTE ---
 
 
 @app.route("/summarize", methods=["POST"])
 def summarize_document():
     """
     Accepts a document string, runs it through the self-correcting LangGraph agent,
-    and returns the final summary and process details.
+    and returns the final summary and process details, including the execution log.
     """
     logger.info("Received request for summarization.")
 
@@ -77,8 +70,8 @@ def summarize_document():
         data = request.get_json()
         document = data.get("document")
 
-        # --- FIX: Get max_refinement_steps from the user's request ---
-        max_steps = data.get("max_refinement_steps", 3)  # Default to 3 if not provided
+        # Get max_refinement_steps from the user's request (default to 3)
+        max_steps = data.get("max_refinement_steps", 3)
 
         # Check for minimum length to ensure we have something meaningful to summarize
         if not document or not isinstance(document, str) or len(document) < 100:
@@ -111,8 +104,7 @@ def summarize_document():
             summary_draft="",
             judge_result=None,
             refinement_count=0,
-            # --- FIX: Use the user's input for max_refinement_steps ---
-            max_refinement_steps=max_steps,
+            max_refinement_steps=max_steps,  # Use the user's input
         )
 
     except Exception as e:
@@ -121,40 +113,58 @@ def summarize_document():
 
     # 4. Agent Execution (Core Logic)
     try:
-        # --- FIX: Pass the 'recursion_limit' to the invoke call ---
-        # This ensures the graph stops after the specified number of steps
-        config = {"recursion_limit": max_steps + 5}  # Add a buffer
+        # Pass the 'recursion_limit' to the invoke call
+        config = {"recursion_limit": max_steps + 5}  # Add a buffer for safety
 
-        # We need to capture the full log. We'll manually stream and collect it.
         full_execution_log = []
 
-        # Stream the execution to get intermediate steps
+        # Stream the execution to get intermediate steps and collect them
         for chunk in agent_graph.stream(initial_state, config=config):
             # 'chunk' will be a dictionary with the node name as the key
             node_name = list(chunk.keys())[0]
             node_result = list(chunk.values())[0]
 
-            # Get the current state
+            # The last chunk's value is the final state update
+            final_state = node_result
+
+            # Get the current loop count
             current_loop_count = node_result.get("refinement_count", 0)
 
-            # Store the log entry
+            # --- FIX: Serialize the JudgeResult object for the log entry ---
+            judge_result_obj: JudgeResult = node_result.get("judge_result")
+
+            # Convert the custom Pydantic object (JudgeResult) to a serializable dictionary
+            serialized_result = None
+            if judge_result_obj:
+                serialized_result = {
+                    "score": judge_result_obj.score,
+                    "critique": judge_result_obj.critique,
+                    "refinement_needed": judge_result_obj.should_refine,
+                }
+            # ----------------------------------------------------------------
+
+            # Store the log entry, using the serialized result
             full_execution_log.append(
                 {
                     "node_name": node_name,
                     "loop_count": current_loop_count,
-                    "result": node_result.get(
-                        "judge_result"
-                    ),  # Only 'judge' will have this
+                    "result": serialized_result,
                 }
             )
 
-        # The final state is the last item in the log
-        final_state = list(full_execution_log[-1].values())[0]
-
         # 5. Extract Final Result and Metadata
+
+        # --- DEBUG LOG ADDED HERE ---
+        # Log the keys of the final state to see what the graph returned
+        logger.info(
+            f"DEBUG: Final state keys returned by LangGraph stream: {list(final_state.keys()) if final_state and isinstance(final_state, dict) else 'Not a dictionary or None'}"
+        )
+        # ---------------------------
+
         final_summary = final_state.get("summary_draft", "Summary not found.")
         final_judge_result: JudgeResult = final_state.get("judge_result")
 
+        # The final result is manually serialized here as well, which is correct.
         critique_details = {}
         if final_judge_result:
             critique_details = {
@@ -163,9 +173,11 @@ def summarize_document():
                 "refinement_needed": final_judge_result.should_refine,
             }
         else:
+            # Handle case where the graph finished without hitting the judge node
             critique_details = {
-                "score": "N/A",  # <-- FIX: Corrected typo 'scpre'
+                "score": "N/A",
                 "critique": "Agent stopped before final critique (max steps likely reached).",
+                "refinement_needed": True,
             }
 
         # 6. Return structured output to the frontend
@@ -176,7 +188,7 @@ def summarize_document():
                     "final_summary": final_summary,
                     "refinement_steps_taken": final_state.get("refinement_count", 0),
                     "final_judge_result": critique_details,
-                    "full_execution_log": full_execution_log,  # <-- FIX: Send the log to the frontend
+                    "full_execution_log": full_execution_log,  # Send the log to the frontend
                 }
             ),
             200,

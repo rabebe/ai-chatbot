@@ -189,17 +189,17 @@
                <span class="text-cyan-400 mr-4 text-4xl font-extrabold">✓</span> How RefineBot Works
             </h2>
             <p class="text-lg text-gray-300 mb-8 leading-relaxed">
-               RefineBot uses a powerful **Critique-and-Refine Loop** to guarantee high-quality results. It doesn't just create a draft—it actively judges, identifies flaws, and fixes its own work, repeating the process until the summary is perfect.
+               RefineBot uses a powerful Critique-and-Refine Loop to guarantee high-quality results. It doesn't just create a draft—it actively judges, identifies flaws, and fixes its own work, repeating the process until the summary is perfect.
             </p>
             <ol class="space-y-6 list-none text-gray-200 mb-10 p-6 bg-gray-900/40 rounded-xl border border-gray-700/50">
                <li class="grid grid-cols-1 md:grid-cols-[8rem_1fr] items-start gap-x-6 gap-y-2">
-                  <span class="text-xl font-bold text-purple-400 whitespace-nowrap">1. Draft:</span> <span class="text-lg">Initial summary creation.</span>
+                  <span class="text-xl font-bold text-purple-400 whitespace-nowrap">1. Draft</span> <span class="text-lg">Initial summary creation.</span>
                </li>
                <li class="grid grid-cols-1 md:grid-cols-[8rem_1fr] items-start gap-x-6 gap-y-2">
-                  <span class="text-xl font-bold text-purple-400 whitespace-nowrap">2. Judge:</span> <span class="text-lg">An independent AI Judge scores the draft (1-10) and provides detailed critique.</span>
+                  <span class="text-xl font-bold text-purple-400 whitespace-nowrap">2. Judge</span> <span class="text-lg">An independent AI Judge scores the draft (1-10) and provides detailed critique.</span>
                </li>
                <li class="grid grid-cols-1 md:grid-cols-[8rem_1fr] items-start gap-x-6 gap-y-2">
-                  <span class="text-xl font-bold text-purple-400 whitespace-nowrap">3. Refine:</span> <span class="text-lg">RefineBot uses the critique to iterate and improve the summary.</span>
+                  <span class="text-xl font-bold text-purple-400 whitespace-nowrap">3. Refine</span> <span class="text-lg">RefineBot uses the critique to iterate and improve the summary.</span>
                </li>
             </ol>
             <div class="text-center">
@@ -233,7 +233,7 @@
                   <span id="charCount" class="font-bold">0</span> / 25,000 characters
                </div>
                <div class="mt-8 flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-6 sm:space-y-0 sm:space-x-8">
-                  <div class="flex items-center space-x-4 flex-shrink">
+                  <div class="flex items-center space-x-4 flex">
                      <label for="maxStepsInput" class="text-lg font-medium text-gray-400 whitespace-nowrap flex items-center">
                         Max Refinements:
                         <span class="info-container relative ml-2">
@@ -317,10 +317,11 @@
          </div>
       </div>
       <footer class="py-12 mt-16 text-center text-gray-600 text-sm border-t border-gray-700/50">
-         &copy; 2025 RefineBot. Powered by Gemini. All rights reserved.
+         &copy; <span id="current-year-span">2025</span> RefineBot. Powered by Gemini. All rights reserved.
       </footer>
       <script>
          // Note: Keep the API URL consistent with your Flask backend URL:
+         document.getElementById('current-year-span').textContent = new Date().getFullYear();
          const API_URL = '/summarize';
          const LOG_MAX_LINES = 15;
 
@@ -567,8 +568,8 @@
              const documentText = elements.inputArea.value.trim();
              const maxSteps = parseInt(elements.maxStepsInput.value, 10);
 
-             if (!documentText) {
-                 updateUI('error', 'Please paste a document into the input field to begin.');
+             if (!documentText || documentText.length < 100) {
+                 updateUI('error', 'Please paste a document of at least 100 characters into the input field to begin.');
                  return;
              }
 
@@ -581,10 +582,12 @@
              updateUI('loading', '', 'Drafting Initial Summary...');
 
              try {
+                 // --- CRITICAL FIX: Changed payload keys to match Flask server expectations (api.py) ---
                  const payload = {
-                     document_text: documentText,
-                     max_steps: maxSteps
+                     document: documentText,             // Was document_text
+                     max_refinement_steps: maxSteps      // Was max_steps
                  };
+                 // --- END CRITICAL FIX ---
 
                  const response = await fetch(API_URL, {
                      method: 'POST',
@@ -596,134 +599,72 @@
 
                  if (!response.ok) {
                      const errorData = await response.json();
+                     // Throw the server's error message
                      throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
                  }
 
                  const result = await response.json();
 
-                 // --- Process Log Entries during streaming/step-by-step update (Assuming a full result is returned here) ---
+                 // --- Process Log Entries during streaming/step-by-step update ---
 
                  let finalSummaryText = result.final_summary || 'No summary returned.';
                  let finalCritiqueText = 'No critique returned.';
                  let finalScoreValue = 'N/A';
-                 let stepsTakenValue = result.steps_taken || 0;
+                 let stepsTakenValue = result.refinement_steps_taken || 0;
 
-                 // Display all process logs
-                 result.process_log.forEach(logEntry => {
-                     // The server response structure is assumed to be:
-                     // {step: 1, type: "CRITIQUE", detail: "..."}
-                     let logType = 'INFO';
-                     if(logEntry.type) {
-                        logType = logEntry.type.toUpperCase();
-                     }
-                     addToLog(logEntry.detail, logType);
 
-                     // Capture final state from the last entry
-                     if (logType === 'CRITIQUE') {
-                         finalCritiqueText = logEntry.detail;
-                         // Attempt to extract score from detail if available in the last critique
-                         const scoreMatch = logEntry.detail.match(/Score:\s*(\d+)/i);
-                         if (scoreMatch && scoreMatch[1]) {
-                             finalScoreValue = parseInt(scoreMatch[1], 10);
+                 // --- FIX: Correctly process the full_execution_log from the server ---
+                 (result.full_execution_log || []).forEach(logEntry => {
+                     const nodeName = logEntry.node_name.replace(/_/g, ' ').toUpperCase();
+                     const loop = logEntry.loop_count;
+
+                     if (nodeName === 'JUDGE SUMMARY' && logEntry.result) {
+                         // 1. Log the Judge's action
+                         addToLog(`[LOOP ${loop}] Judge is evaluating draft...`, 'ACTION');
+
+                         // 2. Log the detailed Critique result
+                         const score = logEntry.result.score;
+                         const critique = logEntry.result.critique;
+                         const needsRefinement = logEntry.result.refinement_needed;
+
+                         addToLog(`Judge Score: ${score}/10. Critique: "${critique}"`, 'CRITIQUE');
+
+                         if (needsRefinement) {
+                             addToLog(`Decision: Refinement needed. Returning to refine loop.`, 'INFO');
+                             updateUI('loading', '', `Refining Summary (Step ${loop + 1}/${maxSteps})...`);
+                         } else {
+                             addToLog(`Decision: Summary Approved. Stopping process.`, 'SUCCESS');
                          }
-                     } else if (logType === 'SUMMARY') {
-                         // Assuming the last summary log is the final one
-                         finalSummaryText = logEntry.detail;
+
+                     } else if (nodeName === 'GENERATE SUMMARY') {
+                         addToLog(`[LOOP ${loop}] Generating/Refining Summary Draft...`, 'ACTION');
                      }
                  });
+                 // --- END FIX ---
 
-                 // Update Final Metrics Section
-                 elements.stepsTaken.textContent = stepsTakenValue;
-                 elements.finalSummary.textContent = finalSummaryText;
-                 elements.finalCritique.textContent = finalCritiqueText;
+                 // Final Metric Updates
+                 finalSummaryText = result.final_summary || 'No summary returned.';
+                 stepsTakenValue = result.refinement_steps_taken || 0;
 
-                 // Final score badge update
-                 if (typeof finalScoreValue === 'number' && !isNaN(finalScoreValue)) {
-                     updateScoreBadge(finalScoreValue);
-                 } else {
-                     updateScoreBadge('N/A');
+                 if (result.final_judge_result) {
+                     finalCritiqueText = result.final_judge_result.critique;
+                     finalScoreValue = result.final_judge_result.score;
                  }
+
+                 elements.finalSummary.textContent = finalSummaryText;
+                 elements.stepsTaken.textContent = stepsTakenValue;
+                 elements.finalCritique.textContent = finalCritiqueText;
+                 updateScoreBadge(finalScoreValue);
 
                  updateUI('ready');
 
              } catch (error) {
-                 console.error("RefineBot Run Error:", error);
-                 updateUI('error', error.message || 'An unknown error occurred during the API call.');
+                 updateUI('error', error.message);
              }
          }
 
-         // --- Tooltip Logic (Unchanged but ensuring it is functional) ---
-         document.querySelectorAll('.info-container').forEach(container => {
-             const icon = container.querySelector('.info-icon');
-             const tooltip = container.querySelector('.tooltip-text');
-
-             if (tooltip) {
-                 // Initial positioning for the tooltip (off-screen or hidden)
-                 tooltip.style.position = 'absolute';
-                 tooltip.style.visibility = 'hidden';
-                 tooltip.style.opacity = '0';
-                 tooltip.style.zIndex = '50';
-                 tooltip.style.width = '200px';
-                 tooltip.style.padding = '8px 12px';
-                 tooltip.style.borderRadius = '0.5rem';
-                 tooltip.style.left = '50%';
-                 tooltip.style.top = '100%';
-                 tooltip.style.transform = 'translate(-50%, 10px)';
-                 tooltip.style.transition = 'opacity 0.2s, transform 0.2s';
-
-                 // Create an arrow (pseudo-element equivalent)
-                 const arrow = document.createElement('div');
-                 arrow.className = 'absolute h-0 w-0 border-8 border-transparent';
-                 arrow.style.top = '-8px';
-                 arrow.style.left = '50%';
-                 arrow.style.transform = 'translateX(-50%)';
-                 arrow.style.borderBottomColor = '#374151'; // Match tooltip background
-                 tooltip.appendChild(arrow);
-             }
-
-             const showTooltip = () => {
-                 if (tooltip) {
-                     tooltip.style.visibility = 'visible';
-                     tooltip.style.opacity = '1';
-                     tooltip.style.transform = 'translate(-50%, 0)';
-                 }
-             };
-
-             const hideTooltip = () => {
-                 if (tooltip) {
-                     tooltip.style.opacity = '0';
-                     tooltip.style.transform = 'translate(-50%, 10px)';
-                     // Use a slight delay before hiding completely to allow transition to finish
-                     setTimeout(() => {
-                          if(tooltip.style.opacity === '0') {
-                             tooltip.style.visibility = 'hidden';
-                          }
-                     }, 200);
-                 }
-             };
-
-             icon?.addEventListener('mouseenter', showTooltip);
-             icon?.addEventListener('mouseleave', hideTooltip);
-             icon?.addEventListener('focus', showTooltip);
-             icon?.addEventListener('blur', hideTooltip);
-             container.addEventListener('touchstart', (e) => {
-                 e.preventDefault();
-                 if (tooltip.style.opacity === '1') {
-                     hideTooltip();
-                 } else {
-                     // Hide any other active tooltips before showing this one
-                     document.querySelectorAll('.tooltip-text').forEach(t => {
-                         if (t !== tooltip) {
-                             t.style.opacity = '0';
-                             setTimeout(() => t.style.visibility = 'hidden', 200);
-                         }
-                     });
-                     showTooltip();
-                 }
-             });
-         });
-
-
+         // Fix: Ensure the document input is checked on every key press
+         elements.inputArea?.addEventListener('input', updateCharCount);
       </script>
    </body>
 </html>
