@@ -111,7 +111,7 @@
                         Max Refinements:
                         <span class="info-container relative ml-2">
                            <p id="refine-description" class="text-sm text-gray-500 whitespace-normal">
-                              The maximum number of times refine will loop.
+                              Refine will loop a maximum of 5 times.
                            </p>
                         </span>
                      </label>
@@ -139,54 +139,60 @@
                   <span class="font-bold">ERROR:</span> <span id="errorDetails"></span>
                </p>
             </div>
-            <div class="lg:grid lg:grid-cols-2 lg:gap-12 xl:gap-16">
-               <div class="card p-8 sm:p-10 mb-12 lg:mb-0">
-                  <h2 class="text-2xl font-semibold mb-6 text-white flex items-center">
-                     <span class="text-purple-400 mr-4 text-3xl font-bold">2.</span> Final Summary & Metrics
-                  </h2>
-                  <div class="mb-8 border-b border-gray-700/50 pb-6">
-                     <h3 class="text-base font-bold text-gray-300 mb-2 uppercase tracking-wider">
-                        Final Refined Summary
-                     </h3>
-                     <div id="finalSummary" class="text-lg text-gray-200 italic
-                        bg-gray-900/40 p-5 rounded-lg
-                        border border-gray-700/50 min-h-[8rem] leading-relaxed">
-                        RefineBot is ready to summarize your text.
-                     </div>
-                  </div>
-                  <div class="grid grid-cols-1 md:grid-cols-4 gap-8 items-start">
-                     <div class="col-span-1 flex flex-col items-center justify-center">
-                        <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase tracking-wider">Judge Score</h3>
-                        <div id="scoreBadge" class="w-28 h-28 flex items-center justify-center rounded-full
-                           transition-colors duration-500 shadow-xl bg-gray-600">
-                           <p id="finalScore" class="text-4xl font-extrabold text-white">N/A</p>
-                        </div>
-                        <p class="text-xs text-gray-500 mt-2">Quality (1-10)</p>
-                     </div>
-                     <div class="col-span-1 text-center mt-4 md:mt-0">
-                        <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase tracking-wider">Total Fixes</h3>
-                        <p id="stepsTaken" class="text-5xl font-extrabold text-purple-400 transition-all duration-300">0</p>
-                        <p class="text-xs text-gray-500">Self-Correction Loops</p>
-                     </div>
-                     <div class="md:col-span-2 mt-4 md:mt-0">
-                        <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase tracking-wider">Final Critique Summary</h3>
-                        <p id="finalCritique" class="text-base text-gray-300 italic
-                           bg-gray-900/40 p-4 rounded-lg
-                           border border-gray-700/50 min-h-[6rem] leading-normal">The Judge has not yet evaluated the final output.</p>
-                     </div>
+
+            <!-- START OF NEW STACKED LAYOUT -->
+
+            <!-- ROW 2 (Formerly section 3, column 2): RefineBot's Log -->
+            <div class="card p-8 sm:p-10">
+               <h2 class="text-2xl font-semibold mb-6 text-white flex items-center">
+                  <span class="text-purple-400 mr-4 text-3xl font-bold">2.</span> RefineBot's Log
+               </h2>
+               <div id="processLog" class="bg-gray-900/40 text-gray-300 text-sm p-6
+                  rounded-xl font-mono overflow-auto h-56
+                  border-2 border-gray-700/50 leading-relaxed">
+                  <div class="log-entry">[SYSTEM] Initializing RefineBot systems... Ready to proceed.</div>
+               </div>
+            </div>
+
+            <!-- ROW 3 (Formerly section 2, column 1): Final Summary & Metrics -->
+            <div class="card p-8 sm:p-10">
+               <h2 class="text-2xl font-semibold mb-6 text-white flex items-center">
+                  <span class="text-purple-400 mr-4 text-3xl font-bold">3.</span> Final Summary & Metrics
+               </h2>
+               <div class="mb-8 border-b border-gray-700/50 pb-6">
+                  <h3 class="text-base font-bold text-gray-300 mb-2 uppercase tracking-wider">
+                     Final Refined Summary
+                  </h3>
+                  <div id="finalSummary" class="text-lg text-gray-200 italic
+                     bg-gray-900/40 p-5 rounded-lg
+                     border border-gray-700/50 min-h-[8rem] leading-relaxed">
+                     RefineBot is ready to summarize your text.
                   </div>
                </div>
-               <div class="card p-8 sm:p-10">
-                  <h2 class="text-2xl font-semibold mb-6 text-white flex items-center">
-                     <span class="text-purple-400 mr-4 text-3xl font-bold">3.</span> RefineBot's Log
-                  </h2>
-                  <div id="processLog" class="bg-gray-900/40 text-gray-300 text-sm p-6
-                     rounded-xl font-mono overflow-auto h-56
-                     border-2 border-gray-700/50 leading-relaxed">
-                     <div class="log-entry">[SYSTEM] Initializing RefineBot systems... Ready to proceed.</div>
+               <div class="grid grid-cols-1 md:grid-cols-4 gap-8 items-start">
+                  <div class="col-span-1 flex flex-col items-center justify-center">
+                     <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase tracking-wider">Judge Score</h3>
+                     <div id="scoreBadge" class="w-28 h-28 flex items-center justify-center rounded-full
+                        transition-colors duration-500 shadow-xl bg-gray-600">
+                        <p id="finalScore" class="text-4xl font-extrabold text-white">N/A</p>
+                     </div>
+                     <p class="text-xs text-gray-500 mt-2">Quality (1-10)</p>
+                  </div>
+                  <div class="col-span-1 text-center mt-4 md:mt-0">
+                     <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase tracking-wider">Total Fixes</h3>
+                     <p id="stepsTaken" class="text-5xl font-extrabold text-purple-400 transition-all duration-300">0</p>
+                     <p class="text-xs text-gray-500">Self-Correction Loops</p>
+                  </div>
+                  <div class="md:col-span-2 mt-4 md:mt-0">
+                     <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase tracking-wider">Final Critique Summary</h3>
+                     <p id="finalCritique" class="text-base text-gray-300 italic
+                        bg-gray-900/40 p-4 rounded-lg
+                        border border-gray-700/50 min-h-[6rem] leading-normal">The Judge has not yet evaluated the final output.</p>
                   </div>
                </div>
             </div>
+            <!-- END OF NEW STACKED LAYOUT -->
+
          </div>
       </div>
       <footer class="py-12 mt-16 text-center text-gray-600 text-sm border-t border-gray-700/50">
@@ -268,7 +274,7 @@
 
                  elements.fixedHeaderTitle.textContent = 'RefineBot';
 
-                 resetAppPage();
+                 resetAppPage(true); // Pass flag to clear outputs only
                  document.title = 'RefineBot: Workbench';
 
              } else {
@@ -302,10 +308,12 @@
          // --- END CRITICAL CHANGE ---
 
          // --- Function to reset the workbench page ---
-         function resetAppPage() {
-             // Clear inputs
-             elements.inputArea.value = '';
-             elements.maxStepsInput.value = '3';
+         function resetAppPage(keepInputContent = false) {
+             // CRITICAL FIX: Only clear the input value if explicitly told to,
+             // otherwise preserve the document text.
+             if (!keepInputContent) {
+                 elements.inputArea.value = '';
+             }
 
              // Reset output fields
              elements.finalSummary.textContent = 'RefineBot is ready to summarize your text.';
@@ -335,7 +343,7 @@
 
              if (input > max * 0.9) {
                  elements.charCount.classList.add('text-red-400', 'font-extrabold');
-                 elements.charCount.classList.remove('text-indigo-400');
+                 elements.charCount.classList.remove('text-purple-400');
              } else if (input > max * 0.5) {
                  elements.charCount.classList.add('text-purple-400'); /* Changed from indigo */
                  elements.charCount.classList.remove('text-red-400');
@@ -375,18 +383,39 @@
 
          function updateScoreBadge(score) {
              const badge = elements.scoreBadge;
-             badge.className = "w-28 h-28 flex items-center justify-center rounded-full transition-colors duration-500 shadow-xl"; /* Larger badge */
+             badge.className = "w-28 h-28 flex items-center justify-center rounded-full transition-colors duration-500 shadow-xl";
 
+             // Set text content first
+             elements.finalScore.textContent = score;
+
+             // Handle known status strings
              if (score === 'N/A' || score === 'ERR' || score === '...') {
                  badge.classList.add('bg-gray-600', 'shadow-gray-700/50');
-             } else if (score >= 8) {
-                 badge.classList.add('bg-green-600', 'shadow-green-500/50');
-             } else if (score >= 5) {
-                 badge.classList.add('bg-yellow-600', 'shadow-yellow-500/50');
-             } else {
-                 badge.classList.add('bg-red-600', 'shadow-red-500/50');
+                 return;
              }
-             elements.finalScore.textContent = score;
+
+             // Handle numeric scoring (assuming server returns a number or number string 1-10)
+             const numericScore = parseFloat(score);
+
+             if (!isNaN(numericScore)) {
+                 if (numericScore >= 8) {
+                     badge.classList.add('bg-green-600', 'shadow-green-500/50');
+                 } else if (numericScore >= 5) {
+                     badge.classList.add('bg-yellow-600', 'shadow-yellow-500/50');
+                 } else {
+                     badge.classList.add('bg-red-600', 'shadow-red-500/50');
+                 }
+             } else {
+                 // Fallback for non-numeric score (e.g., 'Excellent')
+                 const lowerScore = String(score).toLowerCase();
+                 if (lowerScore.includes('excellent') || lowerScore.includes('pass')) {
+                     badge.classList.add('bg-green-600', 'shadow-green-500/50');
+                 } else if (lowerScore.includes('good') || lowerScore.includes('adequate')) {
+                     badge.classList.add('bg-yellow-600', 'shadow-yellow-500/50');
+                 } else {
+                     badge.classList.add('bg-red-600', 'shadow-red-500/50');
+                 }
+             }
          }
 
          function updateUI(status, details = '', currentStep = '') {
@@ -447,7 +476,7 @@
              }
 
              // Clear previous results and logs before starting a new run
-             resetAppPage();
+             resetAppPage(true);
 
              // Add initial log entry (which would have been wiped by reset)
              addToLog(`Starting refinement process with ${maxSteps} maximum steps.`, 'INFO');
