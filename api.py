@@ -118,6 +118,7 @@ def summarize_document():
 
         full_execution_log = []
 
+        final_state = {}
         # Stream the execution to get intermediate steps and collect them
         for chunk in agent_graph.stream(initial_state, config=config):
             # 'chunk' will be a dictionary with the node name as the key
@@ -125,12 +126,12 @@ def summarize_document():
             node_result = list(chunk.values())[0]
 
             # The last chunk's value is the final state update
-            final_state = node_result
+            final_state.update(chunk)
 
             # Get the current loop count
             current_loop_count = node_result.get("refinement_count", 0)
 
-            # --- FIX: Serialize the JudgeResult object for the log entry ---
+            # --- Serialize the JudgeResult object for the log entry ---
             judge_result_obj: JudgeResult = node_result.get("judge_result")
 
             # Convert the custom Pydantic object (JudgeResult) to a serializable dictionary
@@ -161,10 +162,19 @@ def summarize_document():
         )
         # ---------------------------
 
-        final_summary = final_state.get("summary_draft", "Summary not found.")
-        final_judge_result: JudgeResult = final_state.get("judge_result")
+        # CRITICAL FIX: Find the AgentState object from the last executed node
+        final_state_obj = final_state.get("judge") or final_state.get("summarizer")
 
-        # The final result is manually serialized here as well, which is correct.
+        final_summary = "Summary not found."
+        refinement_count = 0
+        final_judge_result: JudgeResult | None = None
+
+        # 🎯 FIX #1: Use the correct variable name (final_state_obj) and extract data
+        if final_state_obj:
+            final_summary = final_state_obj.get("summary_draft", "Summary not found.")
+            refinement_count = final_state_obj.get("refinement_count", 0)
+            final_judge_result = final_state_obj.get("judge_result")
+
         critique_details = {}
         if final_judge_result:
             critique_details = {
@@ -175,8 +185,8 @@ def summarize_document():
         else:
             # Handle case where the graph finished without hitting the judge node
             critique_details = {
-                "score": "N/A",
-                "critique": "Agent stopped before final critique (max steps likely reached).",
+                "score": "ERR",
+                "critique": "Process ended unexpectedly. Judge result was not found in the final state.",
                 "refinement_needed": True,
             }
 
@@ -186,9 +196,9 @@ def summarize_document():
                 {
                     "status": "success",
                     "final_summary": final_summary,
-                    "refinement_steps_taken": final_state.get("refinement_count", 0),
+                    "refinement_steps_taken": refinement_count,
                     "final_judge_result": critique_details,
-                    "full_execution_log": full_execution_log,  # Send the log to the frontend
+                    "full_execution_log": full_execution_log,
                 }
             ),
             200,
