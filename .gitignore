@@ -26,7 +26,8 @@ logs/
 # Build artifacts
 /static/output.css
 
-# ChromaDB data
+# Databases
+*.db
 data/chromadb/
 data/test_chromadb/
 *.sqlite3
