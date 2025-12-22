@@ -9,11 +9,15 @@ from src.chains.summarizer_refiner import (
     decide_to_continue,
 )
 
+# --- Define a placeholder User ID for all tests ---
+TEST_USER_ID = 999
+
 
 @pytest.fixture
 def initial_state_fixture() -> AgentState:
     """Fixture for a standard initial state."""
     return {
+        "user_id": TEST_USER_ID,
         "document": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.",
         "summary_draft": "",
         "document_chunks": [
@@ -54,21 +58,21 @@ def test_summarizer_node_returns_summary(initial_state_fixture):
     assert "summary_draft" in new_state
     assert isinstance(new_state["summary_draft"], str)
     assert len(new_state["summary_draft"]) > 0
+    assert new_state["user_id"] == TEST_USER_ID
 
 
 def test_judge_node_updates_judge_result(initial_state_fixture):
     """Tests that the judge node updates the judge_result field."""
 
-    # # Mock the LLM to return a predictable JudgeResult object (simulating structured output)
-    #     def mock_structured_invoke(*args, **kwards):
-    #         return mock_judge_result_refine
+    # Set a required state for the judge node
+    initial_state_fixture["summary_draft"] = "A draft to be judged."
 
-    initial_state_fixture["Current_summary"] = "A draft to be judged."
     new_state: Dict[str, Any] = judge_node(initial_state_fixture)
 
     # Assert that the new state contains the expected key and type
     assert "judge_result" in new_state
     assert isinstance(new_state["judge_result"], JudgeResult)
+    assert new_state["user_id"] == TEST_USER_ID
 
 
 def test_decide_to_continue_refine(initial_state_fixture):
@@ -88,13 +92,14 @@ def test_refinement_node_increments_count(initial_state_fixture):
     new_state: Dict[str, Any] = refinement_node(initial_state_fixture)
     assert "refinement_count" in new_state
     assert new_state.get("refinement_count") == 1
+    assert new_state["user_id"] == TEST_USER_ID
 
 
 def test_refinement_node_stops_at_max_steps(initial_state_fixture):
     """Tests that the refinement node stops the loop if max steps"""
 
     initial_state_fixture["refinement_count"] = 3
-    initial_state_fixture["msx_refinement_steps"] = 3
+    initial_state_fixture["max_refinement_steps"] = 3
     initial_state_fixture["judge_result"] = mock_judge_result_refine
 
     new_state: Dict[str, Any] = refinement_node(initial_state_fixture)
@@ -107,3 +112,4 @@ def test_refinement_node_stops_at_max_steps(initial_state_fixture):
     # Verify the conditional edge respects the new state
     final_decision: str = decide_to_continue(new_state)
     assert final_decision == "end"
+    assert new_state["user_id"] == TEST_USER_ID
