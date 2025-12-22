@@ -29,6 +29,7 @@ class AgentState(TypedDict):
     This is passed between agents to maintain context and track progress.
     """
 
+    user_id: int
     # Required Input: The document to be summarized
     input_text: str
 
