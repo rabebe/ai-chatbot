@@ -1,12 +1,28 @@
 """
-Utility functions for file system I/O, path management, and logging
+Utility functions for logging, filesystem paths, user identification,
+and SQLite caching with fuzzy matching, and atomic Redis quota management.
 """
 
 import logging
 from typing import Optional
 from pathlib import Path
 
+# Import Redis client setup from its dedicated file
 
+# --- Constants ---
+# Time-To-Live for the quota key (24 hours in seconds)
+QUOTA_TTL_SECONDS = 24 * 60 * 60
+
+# Time-To-Live for cached summaries (7 days in seconds)
+# This controls how long a summary remains valid in Redis before the system regenerates it.
+CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # 604,800 seconds for 7 days
+
+MIN_CHARS = 100  # Minimum characters for input text to be cached
+
+
+# ----------------------------------------------------
+# LOGGING
+# ----------------------------------------------------
 def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> None:
     """
     Set up logging configuration.
@@ -31,6 +47,9 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> No
     )
 
 
+# ----------------------------------------------------
+# PROJECT PATH HELPERS
+# ----------------------------------------------------
 def get_project_root() -> Path:
     """
     Get the project root directory.
