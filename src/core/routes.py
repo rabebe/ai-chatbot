@@ -169,9 +169,7 @@ def summarize_document(user_id):
             return jsonify(
                 {
                     "status": "cached",
-                    "final_summary": cached_data["summary"],
-                    "refinement_steps_taken": cached_data["steps"],
-                    "final_judge_result": cached_data["judge"],
+                    "evaluation": cached_data["judge"],
                 }
             )
 
@@ -334,7 +332,7 @@ def summarize_document_stream(user_id):
     elif not HAS_REDIS:
         sqlite_match = fuzzy_match_cache(user_id, document_content)
         if sqlite_match:
-            old_input, old_output, old_score, old_critique = sqlite_match
+            old_input, old_output, old_score, old_critique_text = sqlite_match
             logger.info(
                 f"User {user_id} stream summary matched in SQLite cache (fuzzy)."
             )
@@ -346,7 +344,7 @@ def summarize_document_stream(user_id):
                     "refinement_steps_taken": 0,
                     "final_judge_result": {
                         "score": old_score,
-                        "critique": old_critique,
+                        "critique_text": old_critique_text,
                     },
                 }
             )
@@ -412,7 +410,7 @@ def summarize_document_stream(user_id):
                         "score": getattr(judge_obj, "score", None)
                         if judge_obj
                         else None,
-                        "critique": getattr(judge_obj, "critique", None)
+                        "critique_text": getattr(judge_obj, "critique", None)
                         if judge_obj
                         else None,
                         "refinement_needed": getattr(judge_obj, "should_refine", None)
@@ -457,7 +455,7 @@ def summarize_document_stream(user_id):
                 final_evt.update(
                     {
                         "score": getattr(final_judge, "score", None),
-                        "critique": getattr(final_judge, "critique", None),
+                        "critique_text": getattr(final_judge, "critique_text", None),
                         "refinement_needed": getattr(
                             final_judge, "should_refine", None
                         ),
@@ -479,14 +477,14 @@ def summarize_document_stream(user_id):
                 document_content,
                 final_summary,
                 score=getattr(final_judge, "score", None),
-                critique=getattr(final_judge, "critique", None),
+                critique_text=getattr(final_judge, "critique_text", None),
             )
 
             # 6. Cache the Result in Redis
             if HAS_REDIS:
                 final_judge_details = {
                     "score": getattr(final_judge, "score", None),
-                    "critique": getattr(final_judge, "critique", None),
+                    "critique_text": getattr(final_judge, "critique_text", None),
                     "refinement_needed": getattr(final_judge, "should_refine", None),
                 }
                 cache_data = {

@@ -6,6 +6,7 @@ and SQLite caching with fuzzy matching, and atomic Redis quota management.
 import logging
 import sqlite3
 import hashlib
+import time
 from typing import Optional, Tuple, List
 from pathlib import Path
 from difflib import SequenceMatcher
@@ -90,17 +91,21 @@ def ensure_logs_directory() -> Path:
 
 
 # ----------------------------------------------------
-# USER IDENTIFICATION
+# USER IDENTIFICATION (With Expiry Logic)
 # ----------------------------------------------------
 def get_user_id(request: Request) -> str:
     """
-    Returns a stable, anonymous user ID.
-    Uses IP + user-agent hashed to protect privacy.
+    Returns a stable, anonymous user ID that rotates every 24 hours.
+    By adding the time_window to the hash, we force the user to
+    'log in' to a new session once the day rolls over.
     """
     ip = request.client.host if request.client else "unknown_ip"
     ua = request.headers.get("user-agent", "unknown_ua")
-    raw = f"{ip}-{ua}"
 
+    # Session window: changes every 24 hours (86400 seconds)
+    time_window = int(time.time()) // 86400
+
+    raw = f"{ip}-{ua}-{time_window}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -148,16 +153,16 @@ def fuzzy_match_cache(
 
     cursor = cache_conn.cursor()
     cursor.execute(
-        "SELECT input_text, output_text FROM summary_cache WHERE user_id = ?",
+        "SELECT input_text, output_text, score, critique_text FROM summary_cache WHERE user_id = ?",
         (user_id,),
     )
 
     all_rows = cursor.fetchall()
 
-    for old_input, old_output in all_rows:
+    for old_input, old_output, old_score, old_critique_text in all_rows:
         similarity = SequenceMatcher(None, new_text, old_input).ratio()
         if similarity >= threshold:
-            return old_input, old_output
+            return old_input, old_output, old_score, old_critique_text
 
     return None
 
@@ -165,7 +170,13 @@ def fuzzy_match_cache(
 # ----------------------------------------------------
 # CACHE SAVE
 # ----------------------------------------------------
-def save_to_cache(user_id: str, input_text: str, output_text: str) -> None:
+def save_to_cache(
+    user_id: str,
+    input_text: str,
+    output_text: str,
+    score: int | None = None,
+    critique_text: str | None = None,
+) -> None:
     if not cache_conn:
         init_cache_db()
 
@@ -173,10 +184,10 @@ def save_to_cache(user_id: str, input_text: str, output_text: str) -> None:
     try:
         cursor.execute(
             """
-            INSERT OR REPLACE INTO summary_cache (user_id, input_text, output_text)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO summary_cache (user_id, input_text, output_text, score, critique_text)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (user_id, input_text, output_text),
+            (user_id, input_text, output_text, score, critique_text),
         )
         cache_conn.commit()
     except Exception as e:
