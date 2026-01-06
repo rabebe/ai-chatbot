@@ -46,4 +46,4 @@ class AgentState(TypedDict):
     refinement_count: int
 
     # Configuration: Maximum number of refinement steps allowed
-    max_refinement_steps: int
+    max_refinement_steps: int = 2
