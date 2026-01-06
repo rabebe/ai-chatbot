@@ -85,6 +85,7 @@ def login():
         return jsonify({"error": "Username and password required"}), 400
 
     user = User.query.filter_by(username=username).first()
+
     if user and user.check_password(password):
         token = jwt.encode({"user_id": user.id}, SECRET_KEY, algorithm="HS256")
         resp = make_response(jsonify({"message": "Login successful"}))
@@ -96,13 +97,19 @@ def login():
 @routes.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
-    username, password = data.get("username"), data.get("password")
-    if not username or not password:
-        return jsonify({"error": "Username and password required"}), 400
+    username, password, email = (
+        data.get("username"),
+        data.get("password"),
+        data.get("email"),
+    )
+    if not username or not password or not email:
+        return jsonify({"error": "Username, password, and email required"}), 400
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "Username already exists"}), 400
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "Email already registered"}), 400
 
-    new_user = User(username=username)
+    new_user = User(username=username, email=email, is_confirmed=False)
     new_user.set_password(password)
     db.session.add(new_user)
     db.session.commit()
