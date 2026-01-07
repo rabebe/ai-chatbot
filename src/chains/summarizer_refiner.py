@@ -187,6 +187,7 @@ def refinement_node(state: AgentState) -> Dict[str, Any]:
             "refinement_count": refinement_count,
             "summary_draft": summary_draft,
             "user_id": user_id,
+            "judge_result": judge_result,
         }
 
     cache_key = f"CRITIQUE:{critique}|||DRAFT:{summary_draft}"

@@ -174,8 +174,8 @@ def save_to_cache(
     user_id: str,
     input_text: str,
     output_text: str,
-    score: int | None = None,
-    critique_text: str | None = None,
+    score: int,
+    critique_text: str,
 ) -> None:
     if not cache_conn:
         init_cache_db()
