@@ -26,7 +26,8 @@ logs/
 # Build artifacts
 /static/output.css
 
-# ChromaDB data
+# Databases
+*.db
 data/chromadb/
 data/test_chromadb/
 *.sqlite3
@@ -38,3 +39,6 @@ data/test_chromadb/
 
 # OS
 .DS_Store
+
+# Redis
+dump.rdb

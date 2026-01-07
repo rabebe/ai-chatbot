@@ -9,3 +9,9 @@ python-dotenv
 flask
 flask-cors
 gunicorn
+flask_sqlalchemy
+sqlalchemy
+pyjwt
+fastapi
+redis
+flask-migrate

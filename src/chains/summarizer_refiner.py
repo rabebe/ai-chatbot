@@ -1,98 +1,77 @@
 import os
 import logging
-import json
 from typing import Dict, Any
+from difflib import SequenceMatcher
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.exceptions import OutputParserException
-from pydantic import ValidationError
 
 from ..core.models import AgentState, JudgeResult
+from ..core.utils import init_cache_db, fuzzy_match_cache, save_to_cache
 
 # --- Configuration ---
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize LLM (Ensure GOOGLE_API_KEY is set in your environment)
+# Initialize LLM
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     temperature=0.1,
     google_api_key=os.getenv("GOOGLE_API_KEY"),
 )
 
+# Initialize cache database
+init_cache_db()
+
+
+# --- Utility ---
+def compute_diff_ratio(a: str, b: str) -> float:
+    """Return similarity ratio between two strings."""
+    return SequenceMatcher(None, a, b).ratio()
+
+
 # --- Prompts ---
-
-# 1. Initial Summarization Prompt
-INITIAL_SUMMARY_PROMPT = """You are an expert technical writer. Your task is to generate a comprehensive, coherent, and highly accurate summary of the provided document chunks.
-
-The summary must be easy to read and synthesize information from all chunks.
-
+INITIAL_SUMMARY_PROMPT = """You are an expert technical writer.
 Document Chunks:
 {document_chunks}
-
 ---
 Initial Summary Draft:"""
 
-# 2. Refinement Prompt
-REFINEMENT_PROMPT = """You are an expert editor specializing in technical documentation. Your task is to refine the existing summary draft based on the Judge's specific critique.
-
-The goal is to produce a final, high-quality, and accurate summary.
-
+REFINEMENT_PROMPT = """You are an expert editor specializing in technical documentation.
 Critique:
 {critique}
-
 Current Summary Draft:
 {summary_draft}
-
 ---
 Revised Summary:"""
 
-# 3. Judge Prompt (Critique and Decision)
-JUDGE_PROMPT = """You are the ultimate quality control Judge. Your role is to evaluate a summary draft against the original document chunks.
-
-Your decision must be returned STRICTLY as a JSON object that matches the JudgeResult schema.
-
-Evaluation Criteria:
-1. Accuracy: Does the summary contain any factual errors or misrepresentations?
-2. Completeness: Does the summary cover all major points mentioned in the document?
-3. Coherence: Is the summary well-written, logically structured, and easy to understand?
-4. Conciseness: Is the summary efficient and to the point?
-
-Your final output MUST be a JSON object with three fields:
-- critique: Your detailed feedback on the current summary draft.
-- score: An integer score from 1 (Poor) to 10 (Perfect).
-- should_refine: A boolean (true/false). Set to 'true' if the score is less than 8 or if any major errors exist. Set to 'false' if the summary is acceptable.
-
-Document Chunks:
-{document_chunks}
-
-Current Summary Draft to be Judged:
-{summary_draft}
-
----
-Judge Result (JSON format ONLY):
-"""
 
 # --- Worker Nodes ---
-
-
 def summarizer_node(state: AgentState) -> Dict[str, Any]:
-    """
-    Generates the initial draft of the summary from the document chunks.
-    """
-    logger.info("---EXECUTING SUMMARIZER NODE---")
+    logger.info("--- EXECUTING SUMMARIZER NODE ---")
 
-    # Extract needed state variables
-    document_chunks = state["document_chunks"]
+    document_text = "\n\n---\n\n".join(state["document_chunks"])
+    user_id = state["user_id"]
 
-    # Combine chunks into a single string for the prompt
-    document_text = "\n\n---\n\n".join(document_chunks)
+    cached_output = fuzzy_match_cache(user_id, document_text)
+    if cached_output:
+        _, summary, score, critique_text = cached_output
+        return {
+            "summary_draft": summary,
+            "summary_history": [
+                {
+                    "summary": summary,
+                    "critique": critique_text,
+                    "score": score,
+                }
+            ],
+            "fixes": [],
+            "from_cache": True,
+            "user_id": user_id,
+        }
 
-    # Prepare the prompt
     prompt = ChatPromptTemplate.from_messages(
         [
             SystemMessage(content="You are an expert technical writer."),
@@ -102,186 +81,200 @@ def summarizer_node(state: AgentState) -> Dict[str, Any]:
         ]
     )
 
-    # Create the runnable chain
-    chain = prompt | llm | StrOutputParser()
+    summary = (prompt | llm | StrOutputParser()).invoke({})
 
-    try:
-        # Invoke the chain
-        summary = chain.invoke({})
-        logger.info("Initial summary generated.")
+    save_to_cache(
+        user_id=user_id,
+        input_text=document_text,
+        output_text=summary,
+        score=None,
+        critique_text=None,
+    )
 
-        # Update the state
-        return {"summary_draft": summary}
-    except Exception as e:
-        logger.error(f"Summarizer failed: {e}")
-        # In case of failure, prevent infinite loop and use error message as summary
-        return {
-            "summary_draft": f"ERROR: Summarizer failed to generate summary. {e}",
-            "refinement_count": state.get("refinement_count", 0) + 1,
+    return {
+        "summary_draft": summary,
+        "summary_history": [
+            {
+                "summary": summary,
+                "critique": None,
+                "score": None,
+            }
+        ],
+        "fixes": [],
+        "user_id": user_id,
+    }
+
+
+def judge_node(state: AgentState) -> Dict[str, Any]:
+    logger.info("--- EXECUTING JUDGE NODE (STRICT PROFESSOR) ---")
+
+    document_text = "\n\n---\n\n".join(state["document_chunks"])
+    summary_draft = state["summary_draft"]
+
+    STRICT_JUDGE_PROMPT = f"""
+You are a strict professor evaluating a summary.
+
+Document:
+{document_text}
+
+Summary:
+{summary_draft}
+
+Return JSON with:
+- critique (string)
+- score (integer 1–10)
+- should_refine (boolean)
+"""
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            SystemMessage(content="You are an expert university professor grader."),
+            HumanMessage(content=STRICT_JUDGE_PROMPT),
+        ]
+    )
+
+    result: JudgeResult = (prompt | llm.with_structured_output(JudgeResult)).invoke({})
+
+    SCORE_THRESHOLD = 7
+    result.should_refine = result.score < SCORE_THRESHOLD
+
+    # Update the latest summary entry with judge feedback
+    summary_history = state.get("summary_history", [])
+    if summary_history:
+        summary_history[-1]["critique"] = result.critique
+        summary_history[-1]["score"] = result.score
+    else:
+        summary_history.append(
+            {
+                "summary": summary_draft,
+                "critique": result.critique,
+                "score": result.score,
+            }
+        )
+
+    judge_history = state.get("judge_history", [])
+    judge_history.append(
+        {
+            "iteration": state.get("refinement_count", 0),
+            "score": result.score,
+            "critique": result.critique,
+            "should_refine": result.should_refine,
         }
+    )
+
+    return {
+        "judge_result": result,
+        "summary_draft": summary_draft,
+        "summary_history": summary_history,
+        "judge_history": judge_history,
+        "user_id": state["user_id"],
+    }
 
 
 def refinement_node(state: AgentState) -> Dict[str, Any]:
-    """
-    Refines the summary draft based on the judge's critique.
-    """
-    logger.info("---EXECUTING REFINEMENT NODE---")
+    logger.info("--- EXECUTING REFINEMENT NODE ---")
 
-    # Extract needed state variables
+    judge_result: JudgeResult = state["judge_result"]
     summary_draft = state["summary_draft"]
-    judge_result = state["judge_result"]
-    critique = (
-        judge_result.critique if judge_result else "No specific critique provided."
-    )
+    critique = judge_result.critique
 
-    # Check for loop limit
     refinement_count = state.get("refinement_count", 0) + 1
-    max_steps = state.get("max_refinement_steps", 3)
+    max_steps = state.get("max_refinement_steps", 2)
+    user_id = state["user_id"]
 
     if refinement_count > max_steps:
-        logger.warning(f"Refinement limit reached ({max_steps} steps). Exiting loop.")
-        # If max steps reached, set should_refine to False to end the graph
-        judge_result = JudgeResult(
-            critique="Refinement limit reached.",
-            score=state.get(
-                "judge_result", JudgeResult(critique="", score=0, should_refine=False)
-            ).score,
-            should_refine=False,
-        )
-        # IMPORTANT: Return both judge_result AND summary_draft to ensure state is complete
         return {
-            "judge_result": judge_result,
             "refinement_count": refinement_count,
             "summary_draft": summary_draft,
+            "user_id": user_id,
         }
 
-    # Prepare the prompt
+    cache_key = f"CRITIQUE:{critique}|||DRAFT:{summary_draft}"
+    cached_refined = fuzzy_match_cache(user_id, cache_key)
+    if cached_refined:
+        _, revised_summary, score, critique_text = cached_refined
+        history = state["summary_history"]
+        history.append(
+            {
+                "summary": revised_summary,
+                "critique": critique_text,
+                "score": score,
+            }
+        )
+        return {
+            "summary_draft": revised_summary,
+            "summary_history": history,
+            "from_cache": True,
+            "refinement_count": refinement_count,
+            "user_id": user_id,
+        }
+
     prompt = ChatPromptTemplate.from_messages(
         [
             SystemMessage(content="You are an expert editor."),
             HumanMessage(
                 content=REFINEMENT_PROMPT.format(
-                    critique=critique, summary_draft=summary_draft
+                    critique=critique,
+                    summary_draft=summary_draft,
                 )
             ),
         ]
     )
 
-    # Create the runnable chain
-    chain = prompt | llm | StrOutputParser()
+    revised_summary = (prompt | llm | StrOutputParser()).invoke({})
 
-    try:
-        # Invoke the chain
-        revised_summary = chain.invoke({})
-        logger.info(f"Summary refined (Attempt {refinement_count}).")
-
-        # Update the state
-        return {
-            "summary_draft": revised_summary,
-            "refinement_count": refinement_count,
-        }
-    except Exception as e:
-        logger.error(f"Refiner failed: {e}")
-        # In case of failure, prevent infinite loop
-        judge_result = JudgeResult(
-            critique=f"Refiner failed: {e}", score=0, should_refine=False
+    change_ratio = compute_diff_ratio(summary_draft, revised_summary)
+    fixes = state.get("fixes", [])
+    if change_ratio < 0.9:
+        fixes.append(
+            {
+                "iteration": refinement_count,
+                "before": summary_draft,
+                "after": revised_summary,
+                "change_ratio": change_ratio,
+            }
         )
-        # IMPORTANT: Return both judge_result AND summary_draft for clean termination
-        return {
-            "judge_result": judge_result,
-            "refinement_count": refinement_count,
-            "summary_draft": summary_draft,
-        }
 
-
-def judge_node(state: AgentState) -> Dict[str, Any]:
-    """
-    Critiques the current summary draft and decides whether further refinement is needed.
-    """
-    logger.info("---EXECUTING JUDGE NODE---")
-
-    # Extract needed state variables
-    document_chunks = state["document_chunks"]
-    summary_draft = state["summary_draft"]
-
-    # Combine chunks into a single string for the judge
-    document_text = "\n\n---\n\n".join(document_chunks)
-
-    # Prepare the prompt
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            SystemMessage(
-                content="You are the ultimate quality control Judge. Your output must be valid JSON matching the JudgeResult schema."
-            ),
-            HumanMessage(
-                content=JUDGE_PROMPT.format(
-                    document_chunks=document_text, summary_draft=summary_draft
-                )
-            ),
-        ]
+    save_to_cache(
+        user_id=user_id,
+        input_text=cache_key,
+        output_text=revised_summary,
+        score=None,
+        critique_text=critique,
     )
 
-    # Create the structured output chain
-    structured_llm = llm.with_structured_output(JudgeResult)
-    chain = prompt | structured_llm
+    history = state["summary_history"]
+    history.append(
+        {
+            "summary": revised_summary,
+            "critique": critique,
+            "score": None,
+        }
+    )
 
-    # Attempt to invoke and parse the structured output
-    try:
-        result: JudgeResult = chain.invoke({})
-        logger.info(
-            f"Judge decision: Score={result.score}, Refine={result.should_refine}"
-        )
-
-        # FIX: Always return the summary_draft alongside the judge_result
-        return {"judge_result": result, "summary_draft": summary_draft}
-
-    except (
-        OutputParserException,
-        ValidationError,
-        json.JSONDecodeError,
-        Exception,
-    ) as e:
-        # Handle cases where the LLM fails to output valid JSON
-        logger.error(
-            f"Judge failed to produce valid structured output: {e}. Forcing refinement=False."
-        )
-
-        # Create a fallback result that stops the loop
-        fallback_result = JudgeResult(
-            critique=f"Judge failed to parse output ({type(e).__name__}). Stopping loop.",
-            score=0,
-            should_refine=False,
-        )
-        # FIX: Always return the summary_draft alongside the fallback judge_result
-        return {"judge_result": fallback_result, "summary_draft": summary_draft}
-
-
-# --- Conditional Edges ---
+    return {
+        "summary_draft": revised_summary,
+        "summary_history": history,
+        "fixes": fixes,
+        "refinement_count": refinement_count,
+        "user_id": user_id,
+    }
 
 
 def decide_to_continue(state: AgentState) -> str:
-    """
-    Conditional edge function that determines the next step based on the Judge's result.
-    """
-    judge_result = state.get("judge_result")
+    judge_result: JudgeResult = state.get("judge_result")
     if not judge_result:
-        logger.warning("Judge result missing. Forcing exit.")
         return "end"
 
-    # If the Judge says we need refinement, go to the refinement node
-    if judge_result.should_refine:
-        # Check refinement count to prevent infinite loops
-        refinement_count = state.get("refinement_count", 0)
-        max_steps = state.get("max_refinement_steps", 3)
+    if judge_result.should_refine and state.get("refinement_count", 0) < state.get(
+        "max_refinement_steps", 2
+    ):
+        return "refine"
 
-        if refinement_count < max_steps:
-            logger.info("Refinement needed. Continuing loop.")
-            return "refine"
-        else:
-            logger.warning(
-                f"Max refinement steps ({max_steps}) reached. Ending process."
-            )
-            return "end"
-    else:
-        logger.info("Summary acceptable. Ending process.")
-        return "end"
+    return "end"
+
+
+def finalize_summaries(state: AgentState) -> Dict[str, Any]:
+    logger.info("--- FINALIZING SUMMARIES ---")
+    state["summary_history"] = state.get("summary_history", [])[-3:]
+    return state
