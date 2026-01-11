@@ -1,6 +1,11 @@
 import logging
 import json
-from datetime import datetime
+import hashlib
+import secrets
+from datetime import datetime, timedelta
+from functools import wraps
+
+import jwt
 from flask import (
     Blueprint,
     request,
@@ -9,34 +14,34 @@ from flask import (
     Response,
     stream_with_context,
 )
-from functools import wraps
-import jwt
-import hashlib
 
 from models import User, Summary
 from extensions import db
+
 from src.core.agent_graph import agent_graph
 from src.core.document_processor import process_document
+from src.core.models import JudgeResult
+from src.core.redis_client import redis_client, HAS_REDIS
 from src.core.utils import (
     decrement_and_check_quota,
     refund_user_quota,
     get_remaining_quota,
-    fuzzy_match_cache,
+    fuzzy_match_summary,
     MIN_CHARS,
     CACHE_TTL_SECONDS,
-    save_to_cache,
+    save_summary,
 )
-from src.core.redis_client import redis_client, HAS_REDIS
-from src.core.models import JudgeResult
 
-# --- Logging ---
+# -----------------------
+# Logging
+# -----------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Blueprint for all API routes ---
-routes = Blueprint(
-    "routes", __name__, url_prefix="/api"
-)  # ✅ prefix all API routes with /api
+# -----------------------
+# Blueprint
+# -----------------------
+routes = Blueprint("routes", __name__, url_prefix="/api")
 SECRET_KEY = "supersecret"
 
 
@@ -45,30 +50,30 @@ SECRET_KEY = "supersecret"
 # -----------------------
 def login_required(f):
     @wraps(f)
-    def decorated_function(*args, **kwargs):
+    def decorated(*args, **kwargs):
         token = request.cookies.get("access_token")
         if not token:
             return jsonify({"error": "Authentication required"}), 401
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-            user_id = payload["user_id"]
         except jwt.ExpiredSignatureError:
             return jsonify({"error": "Token expired"}), 401
         except jwt.InvalidTokenError:
             return jsonify({"error": "Invalid token"}), 401
-        return f(user_id=user_id, *args, **kwargs)
 
-    return decorated_function
+        return f(user_id=payload["user_id"], *args, **kwargs)
+
+    return decorated
 
 
 # -----------------------
-# Utility functions
+# Utilities
 # -----------------------
 def generate_content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def now_iso():
+def now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
 
@@ -78,45 +83,71 @@ def now_iso():
 @routes.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
-    username, password = data.get("username"), data.get("password")
-    if not username or not password:
-        return jsonify({"error": "Username and password required"}), 400
+    user = User.query.filter_by(username=data.get("username")).first()
 
-    user = User.query.filter_by(username=username).first()
-    if user and user.check_password(password):
-        token = jwt.encode({"user_id": user.id}, SECRET_KEY, algorithm="HS256")
-        resp = make_response(jsonify({"message": "Login successful"}))
-        resp.set_cookie("access_token", token, httponly=True)
-        return resp
-    return jsonify({"error": "Invalid credentials"}), 401
+    if not user or not user.check_password(data.get("password")):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    token = jwt.encode({"user_id": user.id}, SECRET_KEY, algorithm="HS256")
+    resp = make_response(jsonify({"message": "Login successful"}))
+    resp.set_cookie("access_token", token, httponly=True)
+    return resp
 
 
 @routes.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
-    username, password, email = (
-        data.get("username"),
-        data.get("password"),
-        data.get("email"),
-    )
-    if not username or not password or not email:
-        return jsonify({"error": "Username, password, and email required"}), 400
-    if User.query.filter_by(username=username).first():
-        return jsonify({"error": "Username already exists"}), 400
-    if User.query.filter_by(email=email).first():
-        return jsonify({"error": "Email already registered"}), 400
 
-    new_user = User(username=username, email=email)
-    new_user.set_password(password)
-    db.session.add(new_user)
+    if User.query.filter(
+        (User.username == data["username"]) | (User.email == data["email"])
+    ).first():
+        return jsonify({"error": "Username exists"}), 400
+
+    user = User(
+        username=data["username"],
+        email=data["email"],
+        is_verified=False,
+        daily_summary_count=0,
+        last_summary_date=None,
+    )
+
+    user.set_password(data["password"])
+
+    token = secrets.token_urlsafe(32)
+    user.verification_token = token
+    user.token_expiry = datetime.utcnow() + timedelta(hours=24)
+
+    db.session.add(user)
     db.session.commit()
-    return jsonify({"message": "User registered successfully"}), 201
+
+    return jsonify({"message": "User registered", "verification_token": token}), 201
+
+
+@routes.route("/verify-email", methods=["GET"])
+def verify_email():
+    token = request.args.get("token")
+
+    if not token:
+        return jsonify({"error": "Missing token"}), 400
+
+    # Find user by token
+    user = User.query.filter_by(verification_token=token).first()
+    if not user:
+        return jsonify({"error": "Invalid token"}), 400
+
+    # Mark user as verified
+    user.is_verified = True
+    user.verification_token = None
+    user.token_expiry = None
+    db.session.commit()
+
+    return jsonify({"message": "Email verified successfully"}), 200
 
 
 @routes.route("/logout", methods=["POST"])
 def logout():
-    resp = make_response(jsonify({"message": "Logged out successfully"}))
-    resp.set_cookie("access_token", "", httponly=True, expires=0)
+    resp = make_response(jsonify({"message": "Logged out"}))
+    resp.set_cookie("access_token", "", expires=0)
     return resp
 
 
@@ -131,392 +162,345 @@ def me(user_id):
 
 @routes.route("/me/quota", methods=["GET"])
 @login_required
-def get_my_quota(user_id):
+def quota(user_id):
     limit = 3
-    remaining = get_remaining_quota(user_id, limit=limit)
-    return jsonify({"count": limit - remaining, "remaining": remaining, "limit": limit})
+    remaining = get_remaining_quota(user_id, limit)
+    return jsonify({"remaining": remaining, "limit": limit})
 
 
 # -----------------------
-# Dashboard (history)
+# Dashboard
 # -----------------------
 @routes.route("/dashboard", methods=["GET"])
 @login_required
-def get_dashboard(user_id):
-    try:
-        history = (
-            Summary.query.filter_by(user_id=user_id)
-            .order_by(Summary.created_at.desc())
-            .all()
-        )
-        data = [
+def dashboard(user_id):
+    summaries = (
+        Summary.query.filter_by(user_id=user_id)
+        .order_by(Summary.created_at.desc())
+        .all()
+    )
+
+    return jsonify(
+        [
             {
-                "id": item.id,
-                "input_text": item.input_text,
-                "output_text": item.output_text,
-                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "id": s.id,
+                "input_text": s.input_text,
+                "output_text": s.output_text,
+                "score": s.score,
+                "critique_text": s.critique_text,
+                "created_at": s.created_at.isoformat(),
             }
-            for item in history
+            for s in summaries
         ]
-        return jsonify(data), 200
-    except Exception as e:
-        logger.error(f"Dashboard fetch failed: {e}")
-        return jsonify({"error": str(e)}), 500
+    )
 
 
 # -----------------------
-# Summarization (non-streaming)
+# Summarize (non-stream)
 # -----------------------
 @routes.route("/summarize", methods=["POST"])
 @login_required
-def summarize_document(user_id):
+def summarize(user_id):
     data = request.get_json()
-    document = data.get("document")
+    document = data.get("document", "").strip()
     max_steps = data.get("max_refinement_steps", 3)
 
-    if not document or len(document.strip()) < MIN_CHARS:
-        return jsonify(
-            {"error": f"Document too short. Minimum {MIN_CHARS} characters required."}
-        ), 400
+    if len(document) < MIN_CHARS:
+        return jsonify({"error": "Document too short"}), 400
 
-    document_content = document.strip()
-    document_hash = generate_content_hash(document_content)
+    doc_hash = generate_content_hash(document)
 
-    # Redis / SQLite cache
+    # Redis cache
     if HAS_REDIS:
-        cached_summary_data = redis_client.get(document_hash)
-        if cached_summary_data:
-            cached_data = json.loads(cached_summary_data)
-            return jsonify({"status": "cached", "evaluation": cached_data["judge"]})
+        cached = redis_client.get(doc_hash)
+        if cached:
+            return jsonify(json.loads(cached))
 
-    sqlite_match = fuzzy_match_cache(user_id, document_content)
-    if sqlite_match:
-        old_input, old_output, old_score, old_critique_text = sqlite_match
+    # DB fuzzy cache
+    match = fuzzy_match_summary(user_id, document)
+    if match:
+        _, output, score, critique = match
         return jsonify(
             {
-                "status": "sqlite_fuzzy_cache",
-                "final_summary": old_output,
-                "refinement_steps_taken": 0,
+                "status": "cached",
+                "final_summary": output,
                 "final_judge_result": {
-                    "score": old_score,
-                    "critique_text": old_critique_text,
-                    "refinement_needed": old_score < 7
-                    if old_score is not None
-                    else True,
+                    "score": score,
+                    "critique_text": critique,
+                    "refinement_needed": score < 7 if score else True,
                 },
             }
         )
 
     if not decrement_and_check_quota(user_id, limit=3):
-        remaining = get_remaining_quota(user_id, limit=3)
-        return jsonify(
-            {"error": "Daily summary limit reached", "remaining_quota": remaining}
-        ), 429
+        return jsonify({"error": "Quota exceeded"}), 429
 
     try:
-        document_docs = process_document(document)
-        chunks = [doc.page_content for doc in document_docs]
-
-        initial_state = {
+        docs = process_document(document)
+        state = {
             "user_id": user_id,
             "input_text": document,
-            "document_chunks": chunks,
+            "document_chunks": [d.page_content for d in docs],
             "summary_draft": "",
-            "judge_result": None,
-            "summary_history": [],
             "refinement_count": 0,
             "max_refinement_steps": max_steps,
         }
 
-        final_state = agent_graph.invoke(initial_state)
-        final_summary = final_state.get("summary_draft", "")
-        refinement_count = final_state.get("refinement_count", 0)
-        final_judge_result: JudgeResult | None = final_state.get("judge_result")
+        final = agent_graph.invoke(state)
+        summary = final["summary_draft"]
+        judge: JudgeResult = final.get("judge_result")
 
-        # Fallback to summary_history if judge missing
-        if not final_judge_result and final_state.get("summary_history"):
-            last_summary = final_state["summary_history"][-1]
-            final_judge_result = JudgeResult(
-                score=last_summary.get("score"),
-                critique=last_summary.get("critique"),
-                should_refine=(last_summary.get("score", 0) < 7),
-            )
+        save_summary(
+            user_id=user_id,
+            input_text=document,
+            output_text=summary,
+            score=judge.score if judge else None,
+            critique_text=judge.critique if judge else None,
+        )
 
-        critique_details = {
-            "score": final_judge_result.score if final_judge_result else None,
-            "critique_text": final_judge_result.critique
-            if final_judge_result
-            else None,
-            "refinement_needed": final_judge_result.should_refine
-            if final_judge_result
-            else True,
+        response = {
+            "status": "success",
+            "final_summary": summary,
+            "final_judge_result": {
+                "score": judge.score if judge else None,
+                "critique_text": judge.critique if judge else None,
+                "refinement_needed": judge.should_refine if judge else True,
+            },
         }
-
-        # Save to DB & cache
-        db.session.add(
-            Summary(input_text=document, output_text=final_summary, user_id=user_id)
-        )
-        db.session.commit()
-
-        save_to_cache(
-            user_id,
-            document_content,
-            final_summary,
-            score=final_judge_result.score if final_judge_result else None,
-            critique_text=final_judge_result.critique if final_judge_result else None,
-        )
 
         if HAS_REDIS:
-            cache_data = {
-                "summary": final_summary,
-                "steps": refinement_count,
-                "judge": critique_details,
-            }
-            redis_client.set(
-                document_hash, json.dumps(cache_data), ex=CACHE_TTL_SECONDS
-            )
+            redis_client.set(doc_hash, json.dumps(response), ex=CACHE_TTL_SECONDS)
 
-        return jsonify(
-            {
-                "status": "success",
-                "final_summary": final_summary,
-                "refinement_steps_taken": refinement_count,
-                "final_judge_result": critique_details,
-            }
-        )
+        return jsonify(response)
 
     except Exception as e:
-        logger.error(f"LangGraph execution failed for user {user_id}: {e}")
         refund_user_quota(user_id)
-        return jsonify({"error": f"LangGraph execution failed: {e}"}), 500
+        logger.exception("Summarization failed")
+        return jsonify({"error": str(e)}), 500
 
 
-# ---------------------
+# -----------------------
 # Streaming Summarization
-# ---------------------
+# -----------------------
 @routes.route("/summarize_stream", methods=["POST"])
 @login_required
-def summarize_document_stream(user_id):
+def summarize_stream(user_id):
     data = request.get_json(force=True)
-    document = data.get("document")
+    document = data.get("document", "").strip()
     max_steps = data.get("max_refinement_steps", 3)
 
-    if not document or len(document.strip()) < MIN_CHARS:
-        return jsonify(
-            {"error": f"Document too short. Minimum {MIN_CHARS} characters required."}
-        ), 400
+    if len(document) < MIN_CHARS:
+        return jsonify({"error": "Document too short"}), 400
 
-    document_content = document.strip()
-    document_hash = generate_content_hash(document_content)
+    doc_hash = generate_content_hash(document)
 
-    # ---------------------
-    # 1. Cached Response
-    # ---------------------
-    if HAS_REDIS and redis_client.get(document_hash):
-        cached_data = json.loads(redis_client.get(document_hash))
-        # Ensure key is 'critique_text'
-        judge = cached_data.get("judge", {})
-        final_judge_result = {
-            "score": judge.get("score"),
-            "critique_text": judge.get("critique_text"),
-            "refinement_needed": judge.get("refinement_needed"),
-        }
-        return jsonify(
-            {
-                "status": "cached",
-                "final_summary": cached_data.get("summary"),
-                "refinement_steps_taken": cached_data.get("steps"),
-                "final_judge_result": final_judge_result,
-            }
-        )
+    # -------------------
+    # Check Redis cache
+    # -------------------
+    if HAS_REDIS:
+        cached = redis_client.get(doc_hash)
+        if cached:
+            cached_data = json.loads(cached)
+            summary = cached_data.get("final_summary", "")
+            judge = cached_data.get("final_judge_result", {}) or {}
+            critique = judge.get("critique_text", "")
+            score = judge.get("score", 0)
 
-    elif not HAS_REDIS:
-        sqlite_match = fuzzy_match_cache(user_id, document_content)
-        if sqlite_match:
-            old_input, old_output, old_score, old_critique_text = sqlite_match
-            return jsonify(
-                {
-                    "status": "sqlite_fuzzy_cache",
-                    "message": "85%+ Similarity Match found in history",
-                    "final_summary": old_output,
-                    "refinement_steps_taken": 0,
-                    "final_judge_result": {
-                        "score": old_score,
-                        "critique_text": old_critique_text,
-                        "refinement_needed": old_score < 7
-                        if old_score is not None
-                        else True,
-                    },
-                }
+            if summary:
+
+                def cached_stream():
+                    logger.info("Returning cached summary from Redis")
+                    yield (
+                        json.dumps(
+                            {
+                                "event": "final_summary",
+                                "summary": summary,
+                                "critique": critique,
+                                "score": score,
+                            }
+                        )
+                        + "\n"
+                    )
+
+                return Response(
+                    stream_with_context(cached_stream()),
+                    mimetype="application/x-ndjson",
+                )
+
+    # -------------------
+    # Check fuzzy DB cache
+    # -------------------
+    match = fuzzy_match_summary(user_id, document)
+    if match:
+        _, output, score, critique = match
+        output = output or ""
+        score = score if isinstance(score, int) else 0
+        critique = critique or ""
+
+        if output:
+
+            def fuzzy_stream():
+                logger.info("Returning cached summary from fuzzy DB")
+                yield (
+                    json.dumps(
+                        {
+                            "event": "final_summary",
+                            "summary": output,
+                            "critique": critique,
+                            "score": score,
+                        }
+                    )
+                    + "\n"
+                )
+
+            return Response(
+                stream_with_context(fuzzy_stream()), mimetype="application/x-ndjson"
             )
 
-    # ---------------------
-    # 2. Quota Check
-    # ---------------------
+    # -------------------
+    # QUOTA CHECK for new text
+    # -------------------
     if not decrement_and_check_quota(user_id, limit=3):
-        remaining = get_remaining_quota(user_id, limit=3)
-        return jsonify(
-            {"error": "Daily summary limit reached", "remaining_quota": remaining}
-        ), 429
+        return jsonify({"error": "Quota exceeded"}), 429
 
-    # ---------------------
-    # 3. Process Document
-    # ---------------------
-    document_docs = process_document(document)
-    chunks = [doc.page_content for doc in document_docs]
-    initial_state = {
+    # -------------------
+    # Process document and stream AI updates
+    # -------------------
+    docs = process_document(document)
+    state = {
         "user_id": user_id,
-        "input_text": document,
-        "document_chunks": chunks,
+        "document_chunks": [d.page_content for d in docs],
         "summary_draft": "",
-        "judge_result": None,
         "refinement_count": 0,
         "max_refinement_steps": max_steps,
     }
 
-    def generator():
-        final_summary = initial_state["summary_draft"]
-        final_judge = None
-        refinement_count = 0
+    def extract_summary(update):
+        """Extract summary draft from known keys/nodes."""
+        if not isinstance(update, dict):
+            return None
+        # Top-level summary
+        if "summary_draft" in update and update["summary_draft"]:
+            return update["summary_draft"]
+        # Summarizer node
+        if "summarizer" in update and "summary_draft" in update["summarizer"]:
+            return update["summarizer"]["summary_draft"]
+        # Judge node
+        if "judge" in update and "summary_draft" in update["judge"]:
+            return update["judge"]["summary_draft"]
+        return None
+
+    def stream():
+        final_summary = None
+        final_score = 0
+        final_critique = ""
 
         try:
-            sent_initial = False
-            for node_output in agent_graph.stream(
-                initial_state, config={"recursion_limit": max_steps + 5}
-            ):
-                node_name = list(node_output.keys())[0]
-                node_state = list(node_output.values())[0]
-                summary_draft = node_state.get("summary_draft", "")
-                judge_obj = node_state.get("judge_result")
+            for update in agent_graph.stream(state):
+                logger.info(f"Agent update: {update}")
 
-                # Initial summary
-                if node_name == "summarizer" and not sent_initial:
+                # Convert Pydantic model to dict if needed
+                from src.core.models import JudgeResult
+
+                if isinstance(update, JudgeResult):
+                    update = update.model_dump()
+
+                # -----------------
+                # Draft summaries
+                # -----------------
+                draft = extract_summary(update)
+                if isinstance(draft, str) and draft.strip():
+                    final_summary = draft.strip()
+                    logger.info("Streaming draft summary")
                     yield (
                         json.dumps(
-                            {
-                                "event": "initial_summary",
-                                "summary": summary_draft,
-                                "timestamp": now_iso(),
-                            }
+                            {"event": "refined_summary", "summary": final_summary}
                         )
                         + "\n"
                     )
-                    sent_initial = True
-                    continue
 
-                # Judge decision
-                if node_name == "judge":
+                # -----------------
+                # Judge events
+                # -----------------
+                judge = update.get("judge_result") or update.get("judge", {}).get(
+                    "judge_result"
+                )
+                if judge:
+                    score = judge.get("score")
+                    critique = judge.get("critique")
+
+                    if isinstance(score, int):
+                        final_score = score
+                    if critique:
+                        final_critique = critique
+
+                    logger.info(
+                        f"Streaming judge decision: score={final_score}, critique={final_critique}"
+                    )
+
                     yield (
                         json.dumps(
                             {
                                 "event": "judge_decision",
-                                "score": getattr(judge_obj, "score", None)
-                                if judge_obj
-                                else None,
-                                "critique_text": getattr(judge_obj, "critique", None)
-                                if judge_obj
-                                else None,
-                                "refinement_needed": getattr(
-                                    judge_obj, "should_refine", None
-                                )
-                                if judge_obj
-                                else None,
-                                "timestamp": now_iso(),
+                                "score": final_score,
+                                "critique": final_critique,
                             }
                         )
                         + "\n"
                     )
-                    continue
 
-                # Refinement step
-                if node_name == "refine":
-                    yield (
-                        json.dumps(
-                            {
-                                "event": "refined_summary",
-                                "summary": summary_draft,
-                                "timestamp": now_iso(),
-                            }
-                        )
-                        + "\n"
-                    )
-                    continue
+            # -----------------
+            # Final validation
+            # -----------------
+            if not final_summary:
+                raise RuntimeError("No summary was generated by the agent graph")
 
-            # ---------------------
-            # Final summary
-            # ---------------------
-            final_summary = (
-                node_state.get("summary_draft", "") if node_state else final_summary
-            )
-            final_judge = node_state.get("judge_result") if node_state else None
-            refinement_count = (
-                node_state.get("refinement_count", 0) if node_state else 0
-            )
-
-            final_evt = {
-                "event": "final_summary",
-                "summary": final_summary,
-                "timestamp": now_iso(),
-            }
-
-            if final_judge:
-                final_evt.update(
+            logger.info("Streaming final summary")
+            yield (
+                json.dumps(
                     {
-                        "score": getattr(final_judge, "score", None),
-                        "critique_text": getattr(final_judge, "critique", None),
-                        "refinement_needed": getattr(
-                            final_judge, "should_refine", None
-                        ),
+                        "event": "final_summary",
+                        "summary": final_summary,
+                        "score": final_score,
+                        "critique": final_critique,
                     }
                 )
-
-            yield json.dumps(final_evt) + "\n"
-
-            # ---------------------
-            # Save DB & Cache
-            # ---------------------
-            db.session.add(
-                Summary(input_text=document, output_text=final_summary, user_id=user_id)
-            )
-            db.session.commit()
-
-            # SQLite cache
-            save_to_cache(
-                user_id,
-                document_content,
-                final_summary,
-                score=getattr(final_judge, "score", None),
-                critique_text=getattr(final_judge, "critique", None),
+                + "\n"
             )
 
-            # Redis cache
-            if HAS_REDIS:
+            # -----------------
+            # Save final summary
+            # -----------------
+            save_summary(
+                user_id=user_id,
+                input_text=document,
+                output_text=final_summary,
+                score=final_score,
+                critique_text=final_critique,
+            )
+
+            # -----------------
+            # Cache in Redis
+            # -----------------
+            if HAS_REDIS and final_summary:
                 redis_client.set(
-                    document_hash,
+                    doc_hash,
                     json.dumps(
                         {
-                            "summary": final_summary,
-                            "steps": refinement_count,
-                            "judge": {
-                                "score": getattr(final_judge, "score", None),
-                                "critique_text": getattr(final_judge, "critique", None),
-                                "refinement_needed": getattr(
-                                    final_judge, "should_refine", None
-                                ),
+                            "final_summary": final_summary,
+                            "final_judge_result": {
+                                "score": final_score,
+                                "critique_text": final_critique,
+                                "output_text": final_summary,
                             },
                         }
                     ),
                     ex=CACHE_TTL_SECONDS,
                 )
 
-        except Exception as exc:
-            logger.exception(f"Streaming summarization failed for user {user_id}.")
-            yield (
-                json.dumps(
-                    {"event": "error", "message": str(exc), "timestamp": now_iso()}
-                )
-                + "\n"
-            )
+        except Exception as e:
             refund_user_quota(user_id)
+            logger.exception("Streaming failed")
+            yield json.dumps({"event": "error", "message": str(e)}) + "\n"
 
-    return Response(stream_with_context(generator()), mimetype="application/x-ndjson")
+    return Response(stream_with_context(stream()), mimetype="application/x-ndjson")
