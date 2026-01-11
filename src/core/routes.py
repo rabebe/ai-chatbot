@@ -1,46 +1,49 @@
 import logging
 import json
-from datetime import datetime
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
+from functools import wraps
+
+import jwt
 from flask import (
     Blueprint,
     request,
     jsonify,
-    render_template,
     make_response,
     Response,
     stream_with_context,
 )
-from functools import wraps
-import jwt
-import hashlib
 
 from models import User, Summary
 from extensions import db
+
 from src.core.agent_graph import agent_graph
 from src.core.document_processor import process_document
-
-# --- IMPORTING UTILITIES AND REDIS COMPONENTS ---
+from src.core.models import JudgeResult
+from src.core.email_service import send_verification_email
+from src.core.redis_client import redis_client, HAS_REDIS
 from src.core.utils import (
     decrement_and_check_quota,
     refund_user_quota,
     get_remaining_quota,
-    fuzzy_match_cache,
+    fuzzy_match_summary,
     MIN_CHARS,
     CACHE_TTL_SECONDS,
+    save_summary,
 )
 
-# Caching and the Redis fallback check
-from src.core.redis_client import redis_client, HAS_REDIS
-from src.core.models import JudgeResult
-
-# --- Logging ---
+# -----------------------
+# Logging
+# -----------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Blueprint ---
-routes = Blueprint("routes", __name__)
-
-SECRET_KEY = "supersecret"  # keep env loading in api.py if needed
+# -----------------------
+# Blueprint
+# -----------------------
+routes = Blueprint("routes", __name__, url_prefix="/api")
+SECRET_KEY = "supersecret"
 
 
 # -----------------------
@@ -48,81 +51,166 @@ SECRET_KEY = "supersecret"  # keep env loading in api.py if needed
 # -----------------------
 def login_required(f):
     @wraps(f)
-    def decorated_function(*args, **kwargs):
+    def decorated(*args, **kwargs):
         token = request.cookies.get("access_token")
         if not token:
             return jsonify({"error": "Authentication required"}), 401
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-            user_id = payload["user_id"]
         except jwt.ExpiredSignatureError:
             return jsonify({"error": "Token expired"}), 401
         except jwt.InvalidTokenError:
             return jsonify({"error": "Invalid token"}), 401
-        return f(user_id=user_id, *args, **kwargs)
 
-    return decorated_function
+        return f(user_id=payload["user_id"], *args, **kwargs)
 
-
-# --- Routes ---
-@routes.route("/", methods=["GET"])
-@routes.route("/index.html", methods=["GET"])
-def serve_index():
-    return render_template("index.html")
+    return decorated
 
 
-@routes.route("/<path:path>", methods=["GET"])
-def serve_app_routes(path):
-    return render_template("index.html")
+# -----------------------
+# Utilities
+# -----------------------
+def generate_content_hash(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-# ----- Auth -----
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat() + "Z"
+
+
+# -----------------------
+# Auth Routes
+# -----------------------
 @routes.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
-    username, password = data.get("username"), data.get("password")
-    if not username or not password:
-        return jsonify({"error": "Username and password required"}), 400
+    user = User.query.filter_by(username=data.get("username")).first()
 
-    user = User.query.filter_by(username=username).first()
+    if not user or not user.check_password(data.get("password")):
+        return jsonify({"error": "Invalid credentials"}), 401
 
-    if user and user.check_password(password):
-        token = jwt.encode({"user_id": user.id}, SECRET_KEY, algorithm="HS256")
-        resp = make_response(jsonify({"message": "Login successful"}))
-        resp.set_cookie("access_token", token, httponly=True)
-        return resp
-    return jsonify({"error": "Invalid credentials"}), 401
+    if not user.is_verified:
+        return jsonify({"error": "Email not verified. Please check your inbox."}), 403
+
+    token = jwt.encode({"user_id": user.id}, SECRET_KEY, algorithm="HS256")
+    resp = make_response(jsonify({"message": "Login successful"}))
+    resp.set_cookie("access_token", token, httponly=True)
+    return resp
 
 
 @routes.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
-    username, password, email = (
-        data.get("username"),
-        data.get("password"),
-        data.get("email"),
-    )
-    if not username or not password or not email:
-        return jsonify({"error": "Username, password, and email required"}), 400
-    if User.query.filter_by(username=username).first():
-        return jsonify({"error": "Username already exists"}), 400
-    if User.query.filter_by(email=email).first():
-        return jsonify({"error": "Email already registered"}), 400
 
-    new_user = User(username=username, email=email, is_confirmed=False)
-    new_user.set_password(password)
-    db.session.add(new_user)
+    if User.query.filter(
+        (User.username == data["username"]) | (User.email == data["email"])
+    ).first():
+        return jsonify({"error": "Username exists"}), 400
+
+    user = User(
+        username=data["username"],
+        email=data["email"],
+        is_verified=False,
+        daily_summary_count=0,
+        last_summary_date=None,
+    )
+
+    user.set_password(data["password"])
+
+    token = secrets.token_urlsafe(32)
+    user.verification_token = token
+    user.token_expiry = datetime.now(timezone.utc) + timedelta(hours=24)
+
+    db.session.add(user)
     db.session.commit()
-    return jsonify({"message": "User registered successfully"}), 201
+
+    # Send verification email
+    try:
+        send_verification_email(user.email, token)
+    except Exception:
+        # Log error but don't block registration
+        logger.exception("Failed to send verification email")
+        return jsonify(
+            {"message": "User registered, but verification email failed to send"}
+        ), 201
+
+    return jsonify({"message": "User registered", "verification_token": token}), 201
+
+
+@routes.route("/verify", methods=["GET"])
+def verify_email():
+    token = request.args.get("token")
+
+    if not token:
+        return jsonify({"error": "Missing token"}), 400
+
+    # Find user by token
+    user = User.query.filter_by(verification_token=token).first()
+    if not user:
+        return jsonify({"error": "Invalid token"}), 400
+
+    # Ensure token_expiry is timezone-aware
+    expiry = user.token_expiry
+    if expiry is None:
+        return jsonify(
+            {"error": "Token expired. Please request a new verification email."}
+        ), 400
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+
+    if expiry < datetime.now(timezone.utc):
+        return jsonify(
+            {"error": "Token expired. Please request a new verification email."}
+        ), 400
+
+    # Mark user as verified
+    user.is_verified = True
+    user.verification_token = None
+    user.token_expiry = None
+    db.session.commit()
+
+    return jsonify({"message": "Email verified successfully"}), 200
+
+
+@routes.route("/resend-verification", methods=["POST"])
+def resend_verification():
+    data = request.get_json()
+    email = data.get("email")
+
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"error": "Email not found"}), 404
+
+    if user.is_verified:
+        return jsonify({"message": "Email already verified"}), 200
+
+    # Generate new token
+    token = secrets.token_urlsafe(32)
+    user.verification_token = token
+    user.token_expiry = datetime.now(timezone.utc) + timedelta(hours=24)
+    db.session.commit()
+
+    try:
+        send_verification_email(user.email, token)
+    except Exception as e:
+        return jsonify({"error": f"Failed to send verification email: {str(e)}"}), 500
+
+    return jsonify({"message": "Verification email resent"}), 200
 
 
 @routes.route("/logout", methods=["POST"])
 def logout():
-    resp = make_response(jsonify({"message": "Logged out successfully"}))
-    resp.set_cookie("access_token", "", httponly=True, expires=0)
+    resp = make_response(jsonify({"message": "Logged out"}))
+    resp.set_cookie("access_token", "", expires=0)
     return resp
 
 
+# -----------------------
+# User info & quota
+# -----------------------
 @routes.route("/me", methods=["GET"])
 @login_required
 def me(user_id):
@@ -131,387 +219,345 @@ def me(user_id):
 
 @routes.route("/me/quota", methods=["GET"])
 @login_required
-def get_my_quota(user_id):
-    from src.core.utils import get_remaining_quota
-
+def quota(user_id):
     limit = 3
-    remaining = get_remaining_quota(user_id, limit=limit)
-
-    return jsonify({"count": limit - remaining, "remaining": remaining, "limit": limit})
-
-
-# Utility to hash content for caching
-def generate_content_hash(content: str) -> str:
-    """Generates a stable SHA256 hash for the document content."""
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    remaining = get_remaining_quota(user_id, limit)
+    return jsonify({"remaining": remaining, "limit": limit})
 
 
-# ----- Summarization Endpoint (Non-streaming) -----
+# -----------------------
+# Dashboard
+# -----------------------
+@routes.route("/dashboard", methods=["GET"])
+@login_required
+def dashboard(user_id):
+    summaries = (
+        Summary.query.filter_by(user_id=user_id)
+        .order_by(Summary.created_at.desc())
+        .all()
+    )
+
+    return jsonify(
+        [
+            {
+                "id": s.id,
+                "input_text": s.input_text,
+                "output_text": s.output_text,
+                "score": s.score,
+                "critique_text": s.critique_text,
+                "created_at": s.created_at.isoformat(),
+            }
+            for s in summaries
+        ]
+    )
+
+
+# -----------------------
+# Summarize (non-stream)
+# -----------------------
 @routes.route("/summarize", methods=["POST"])
 @login_required
-def summarize_document(user_id):
+def summarize(user_id):
     data = request.get_json()
-    document = data.get("document")
+    document = data.get("document", "").strip()
     max_steps = data.get("max_refinement_steps", 3)
 
-    # 1. Input Validation: Fail fast and save all resources
-    if not document or len(document.strip()) < MIN_CHARS:
-        return jsonify(
-            {"error": f"Document too short. Minimum {MIN_CHARS} characters required."}
-        ), 400
+    if len(document) < MIN_CHARS:
+        return jsonify({"error": "Document too short"}), 400
 
-    document_content = document.strip()
-    document_hash = generate_content_hash(document_content)
+    doc_hash = generate_content_hash(document)
 
-    final_summary = None
-
-    # 2. Primary Caching Check (Redis)
+    # Redis cache
     if HAS_REDIS:
-        cached_summary_data = redis_client.get(document_hash)
-        if cached_summary_data:
-            logger.info(
-                f"User {user_id} summary for hash {document_hash} served from Redis cache."
-            )
-            cached_data = json.loads(cached_summary_data)
-            return jsonify(
-                {
-                    "status": "cached",
-                    "evaluation": cached_data["judge"],
-                }
-            )
+        cached = redis_client.get(doc_hash)
+        if cached:
+            return jsonify(json.loads(cached))
 
-    # 3. Fallback Caching Check (SQLite Fuzzy Match)
-    else:
-        # Check SQLite cache if Redis is unavailable
-        sqlite_match = fuzzy_match_cache(user_id, document_content)
-        if sqlite_match:
-            old_input, old_output = sqlite_match
-            logger.info(f"User {user_id} summary matched in SQLite cache (fuzzy).")
-            # Return cached output, simplifying refinement details
-            return jsonify(
-                {
-                    "status": "sqlite_fuzzy_cache",
-                    "final_summary": old_output,
-                    "refinement_steps_taken": 0,
-                    "final_judge_result": {
-                        "critique": "Matched previous similar content in local history."
-                    },
-                }
-            )
-
-    # 4. Quota Check & Atomic Decrement (Only if no cache hit)
-    # This reserves the quota unit before the expensive AI call.
-    if not decrement_and_check_quota(user_id, limit=3):
-        remaining = get_remaining_quota(user_id, limit=3)
+    # DB fuzzy cache
+    match = fuzzy_match_summary(user_id, document)
+    if match:
+        _, output, score, critique = match
         return jsonify(
-            {"error": "Daily summary limit reached", "remaining_quota": remaining}
-        ), 429
+            {
+                "status": "cached",
+                "final_summary": output,
+                "final_judge_result": {
+                    "score": score,
+                    "critique_text": critique,
+                    "refinement_needed": score < 7 if score else True,
+                },
+            }
+        )
 
-    # --- Proceed with expensive AI work ---
+    if not decrement_and_check_quota(user_id, limit=3):
+        return jsonify({"error": "Quota exceeded"}), 429
+
     try:
-        document_docs = process_document(document)
-        chunks = [doc.page_content for doc in document_docs]
-
-        initial_state = {
+        docs = process_document(document)
+        state = {
             "user_id": user_id,
             "input_text": document,
-            "document_chunks": chunks,
+            "document_chunks": [d.page_content for d in docs],
             "summary_draft": "",
-            "judge_result": None,
             "refinement_count": 0,
             "max_refinement_steps": max_steps,
         }
 
-        final_state = agent_graph.invoke(initial_state)
-        final_summary = final_state.get("summary_draft", "")
-        refinement_count = final_state.get("refinement_count", 0)
-        final_judge_result: JudgeResult | None = final_state.get("judge_result")
+        final = agent_graph.invoke(state)
+        summary = final["summary_draft"]
+        judge: JudgeResult = final.get("judge_result")
 
-        critique_details = {
-            "score": final_judge_result.score if final_judge_result else None,
-            "critique": final_judge_result.critique if final_judge_result else None,
-            "refinement_needed": final_judge_result.should_refine
-            if final_judge_result
-            else True,
+        save_summary(
+            user_id=user_id,
+            input_text=document,
+            output_text=summary,
+            score=judge.score if judge else None,
+            critique_text=judge.critique if judge else None,
+        )
+
+        response = {
+            "status": "success",
+            "final_summary": summary,
+            "final_judge_result": {
+                "score": judge.score if judge else None,
+                "critique_text": judge.critique if judge else None,
+                "refinement_needed": judge.should_refine if judge else True,
+            },
         }
 
-        # 5. Save Summary to DB (Commit success) and SQLite cache (fallback)
-        db.session.add(
-            Summary(input_text=document, output_text=final_summary, user_id=user_id)
-        )
-        db.session.commit()
-
-        # Save to local SQLite cache for fuzzy matching fallback
-        from src.core.utils import save_to_cache
-
-        save_to_cache(user_id, document_content, final_summary)
-
-        # 6. Cache the Result in Redis (for fast, exact future lookups)
         if HAS_REDIS:
-            cache_data = {
-                "summary": final_summary,
-                "steps": refinement_count,
-                "judge": critique_details,
-            }
-            redis_client.set(
-                document_hash, json.dumps(cache_data), ex=CACHE_TTL_SECONDS
-            )
+            redis_client.set(doc_hash, json.dumps(response), ex=CACHE_TTL_SECONDS)
 
-        return jsonify(
-            {
-                "status": "success",
-                "final_summary": final_summary,
-                "refinement_steps_taken": refinement_count,
-                "final_judge_result": critique_details,
-            }
-        )
+        return jsonify(response)
 
     except Exception as e:
-        logger.error(f"LangGraph execution failed for user {user_id}: {e}")
-        # 7. CRITICAL: Refund quota on failure
         refund_user_quota(user_id)
-        return jsonify({"error": f"LangGraph execution failed: {e}"}), 500
-
-
-@routes.route("/dashboard", methods=["GET"])
-@login_required
-def get_dashboard(user_id):
-    if not user_id:
-        return jsonify({"error": "Unauthorized"}), 401
-    try:
-        history = (
-            Summary.query.filter(
-                Summary.user_id == user_id,
-                Summary.user_id.isnot(None),  # Extra safety layer
-            )
-            .order_by(Summary.created_at.desc())
-            .all()
-        )
-        # 2. Convert database objects into a JSON-serializable list of dictionaries
-        data = [
-            {
-                "id": item.id,
-                "input_text": item.input_text,
-                "output_text": item.output_text,
-                "created_at": item.created_at.isoformat() if item.created_at else None,
-            }
-            for item in history
-        ]
-
-        # 3. Return as JSON
-        return jsonify(data), 200
-
-    except Exception as e:
-        logger.error(f"Dashboard fetch failed: {e}")
+        logger.exception("Summarization failed")
         return jsonify({"error": str(e)}), 500
 
 
-# ----- Summarization Endpoint (Streaming) -----
+# -----------------------
+# Streaming Summarization
+# -----------------------
 @routes.route("/summarize_stream", methods=["POST"])
 @login_required
-def summarize_document_stream(user_id):
+def summarize_stream(user_id):
     data = request.get_json(force=True)
-    document = data.get("document")
+    document = data.get("document", "").strip()
     max_steps = data.get("max_refinement_steps", 3)
 
-    # 1. Input Validation: Fail fast
-    if not document or len(document.strip()) < MIN_CHARS:
-        return jsonify(
-            {"error": f"Document too short. Minimum {MIN_CHARS} characters required."}
-        ), 400
+    if len(document) < MIN_CHARS:
+        return jsonify({"error": "Document too short"}), 400
 
-    document_content = document.strip()
-    document_hash = generate_content_hash(document_content)
+    doc_hash = generate_content_hash(document)
 
-    # 2. Caching Checks (Same logic as non-streaming, but we return a non-streaming response)
-    if HAS_REDIS and redis_client.get(document_hash):
-        cached_summary_data = redis_client.get(document_hash)
-        logger.info(f"User {user_id} stream summary served from Redis cache.")
-        cached_data = json.loads(cached_summary_data)
-        return jsonify(
-            {
-                "status": "cached",
-                "final_summary": cached_data["summary"],
-                "refinement_steps_taken": cached_data["steps"],
-                "final_judge_result": cached_data["judge"],
-            }
-        )
-    elif not HAS_REDIS:
-        sqlite_match = fuzzy_match_cache(user_id, document_content)
-        if sqlite_match:
-            old_input, old_output, old_score, old_critique_text = sqlite_match
-            logger.info(
-                f"User {user_id} stream summary matched in SQLite cache (fuzzy)."
+    # -------------------
+    # Check Redis cache
+    # -------------------
+    if HAS_REDIS:
+        cached = redis_client.get(doc_hash)
+        if cached:
+            cached_data = json.loads(cached)
+            summary = cached_data.get("final_summary", "")
+            judge = cached_data.get("final_judge_result", {}) or {}
+            critique = judge.get("critique_text", "")
+            score = judge.get("score", 0)
+
+            if summary:
+
+                def cached_stream():
+                    logger.info("Returning cached summary from Redis")
+                    yield (
+                        json.dumps(
+                            {
+                                "event": "final_summary",
+                                "summary": summary,
+                                "critique": critique,
+                                "score": score,
+                            }
+                        )
+                        + "\n"
+                    )
+
+                return Response(
+                    stream_with_context(cached_stream()),
+                    mimetype="application/x-ndjson",
+                )
+
+    # -------------------
+    # Check fuzzy DB cache
+    # -------------------
+    match = fuzzy_match_summary(user_id, document)
+    if match:
+        _, output, score, critique = match
+        output = output or ""
+        score = score if isinstance(score, int) else 0
+        critique = critique or ""
+
+        if output:
+
+            def fuzzy_stream():
+                logger.info("Returning cached summary from fuzzy DB")
+                yield (
+                    json.dumps(
+                        {
+                            "event": "final_summary",
+                            "summary": output,
+                            "critique": critique,
+                            "score": score,
+                        }
+                    )
+                    + "\n"
+                )
+
+            return Response(
+                stream_with_context(fuzzy_stream()), mimetype="application/x-ndjson"
             )
-            return jsonify(
-                {
-                    "status": "sqlite_fuzzy_cache",
-                    "message": "85%+ Similarity Match found in history",
-                    "final_summary": old_output,
-                    "refinement_steps_taken": 0,
-                    "final_judge_result": {
-                        "score": old_score,
-                        "critique_text": old_critique_text,
-                    },
-                }
-            )
 
-    # 3. Quota Check & Atomic Decrement
+    # -------------------
+    # QUOTA CHECK for new text
+    # -------------------
     if not decrement_and_check_quota(user_id, limit=3):
-        remaining = get_remaining_quota(user_id, limit=3)
-        return jsonify(
-            {"error": "Daily summary limit reached", "remaining_quota": remaining}
-        ), 429
+        return jsonify({"error": "Quota exceeded"}), 429
 
-    # --- Proceed with expensive AI work ---
-    document_docs = process_document(document)
-    chunks = [doc.page_content for doc in document_docs]
-
-    initial_state = {
+    # -------------------
+    # Process document and stream AI updates
+    # -------------------
+    docs = process_document(document)
+    state = {
         "user_id": user_id,
-        "input_text": document,
-        "document_chunks": chunks,
+        "document_chunks": [d.page_content for d in docs],
         "summary_draft": "",
-        "judge_result": None,
         "refinement_count": 0,
         "max_refinement_steps": max_steps,
     }
 
-    def now_iso():
-        return datetime.utcnow().isoformat() + "Z"
+    def extract_summary(update):
+        """Extract summary draft from known keys/nodes."""
+        if not isinstance(update, dict):
+            return None
+        # Top-level summary
+        if "summary_draft" in update and update["summary_draft"]:
+            return update["summary_draft"]
+        # Summarizer node
+        if "summarizer" in update and "summary_draft" in update["summarizer"]:
+            return update["summarizer"]["summary_draft"]
+        # Judge node
+        if "judge" in update and "summary_draft" in update["judge"]:
+            return update["judge"]["summary_draft"]
+        return None
 
-    def generator():
-        # Setup variables for post-stream commit/cache
-        final_summary = initial_state["summary_draft"]
-        final_judge = None
-        refinement_count = 0
+    def stream():
+        final_summary = None
+        final_score = 0
+        final_critique = ""
 
         try:
-            sent_initial = False
-            for node_output in agent_graph.stream(
-                initial_state, config={"recursion_limit": max_steps + 5}
-            ):
-                node_name = list(node_output.keys())[0]
-                node_state = list(node_output.values())[0]
-                summary_draft = node_state.get("summary_draft", "")
-                judge_obj = node_state.get("judge_result")
+            for update in agent_graph.stream(state):
+                logger.info(f"Agent update: {update}")
 
-                # Stream logic (same as original) ...
-                if node_name == "summarizer" and not sent_initial:
+                # Convert Pydantic model to dict if needed
+                from src.core.models import JudgeResult
+
+                if isinstance(update, JudgeResult):
+                    update = update.model_dump()
+
+                # -----------------
+                # Draft summaries
+                # -----------------
+                draft = extract_summary(update)
+                if isinstance(draft, str) and draft.strip():
+                    final_summary = draft.strip()
+                    logger.info("Streaming draft summary")
+                    yield (
+                        json.dumps(
+                            {"event": "refined_summary", "summary": final_summary}
+                        )
+                        + "\n"
+                    )
+
+                # -----------------
+                # Judge events
+                # -----------------
+                judge = update.get("judge_result") or update.get("judge", {}).get(
+                    "judge_result"
+                )
+                if judge:
+                    score = judge.get("score")
+                    critique = judge.get("critique")
+
+                    if isinstance(score, int):
+                        final_score = score
+                    if critique:
+                        final_critique = critique
+
+                    logger.info(
+                        f"Streaming judge decision: score={final_score}, critique={final_critique}"
+                    )
+
                     yield (
                         json.dumps(
                             {
-                                "event": "initial_summary",
-                                "summary": summary_draft,
-                                "timestamp": now_iso(),
+                                "event": "judge_decision",
+                                "score": final_score,
+                                "critique": final_critique,
                             }
                         )
                         + "\n"
                     )
-                    sent_initial = True
-                    continue
 
-                if node_name == "judge":
-                    evt = {
-                        "event": "judge_decision",
-                        "score": getattr(judge_obj, "score", None)
-                        if judge_obj
-                        else None,
-                        "critique_text": getattr(judge_obj, "critique", None)
-                        if judge_obj
-                        else None,
-                        "refinement_needed": getattr(judge_obj, "should_refine", None)
-                        if judge_obj
-                        else None,
-                        "timestamp": now_iso(),
-                    }
-                    yield json.dumps(evt) + "\n"
-                    continue
+            # -----------------
+            # Final validation
+            # -----------------
+            if not final_summary:
+                raise RuntimeError("No summary was generated by the agent graph")
 
-                if node_name == "refine":
-                    yield (
-                        json.dumps(
-                            {
-                                "event": "refined_summary",
-                                "summary": summary_draft,
-                                "timestamp": now_iso(),
-                            }
-                        )
-                        + "\n"
-                    )
-                    continue
-
-            # Update final state after successful stream
-            final_summary = (
-                node_state.get("summary_draft", "")
-                if node_state
-                else initial_state["summary_draft"]
-            )
-            final_judge = node_state.get("judge_result") if node_state else None
-            refinement_count = (
-                node_state.get("refinement_count", 0) if node_state else 0
-            )
-
-            # 4. Stream Final Event
-            final_evt = {
-                "event": "final_summary",
-                "summary": final_summary,
-                "timestamp": now_iso(),
-            }
-            if final_judge:
-                final_evt.update(
-                    {
-                        "score": getattr(final_judge, "score", None),
-                        "critique_text": getattr(final_judge, "critique_text", None),
-                        "refinement_needed": getattr(
-                            final_judge, "should_refine", None
-                        ),
-                    }
-                )
-            yield json.dumps(final_evt) + "\n"
-
-            # 5. Save to DB (Commit success) and SQLite cache
-            db.session.add(
-                Summary(input_text=document, output_text=final_summary, user_id=user_id)
-            )
-            db.session.commit()
-
-            # Save to local SQLite cache for fuzzy matching fallback
-            from src.core.utils import save_to_cache
-
-            save_to_cache(
-                user_id,
-                document_content,
-                final_summary,
-                score=getattr(final_judge, "score", None),
-                critique_text=getattr(final_judge, "critique_text", None),
-            )
-
-            # 6. Cache the Result in Redis
-            if HAS_REDIS:
-                final_judge_details = {
-                    "score": getattr(final_judge, "score", None),
-                    "critique_text": getattr(final_judge, "critique_text", None),
-                    "refinement_needed": getattr(final_judge, "should_refine", None),
-                }
-                cache_data = {
-                    "summary": final_summary,
-                    "steps": refinement_count,
-                    "judge": final_judge_details,
-                }
-                redis_client.set(
-                    document_hash, json.dumps(cache_data), ex=CACHE_TTL_SECONDS
-                )
-
-        except Exception as exc:
-            logger.exception(f"Streaming summarization failed for user {user_id}.")
+            logger.info("Streaming final summary")
             yield (
                 json.dumps(
-                    {"event": "error", "message": str(exc), "timestamp": now_iso()}
+                    {
+                        "event": "final_summary",
+                        "summary": final_summary,
+                        "score": final_score,
+                        "critique": final_critique,
+                    }
                 )
                 + "\n"
             )
-            # 7. CRITICAL: Refund quota on failure
-            refund_user_quota(user_id)
 
-    return Response(stream_with_context(generator()), mimetype="application/x-ndjson")
+            # -----------------
+            # Save final summary
+            # -----------------
+            save_summary(
+                user_id=user_id,
+                input_text=document,
+                output_text=final_summary,
+                score=final_score,
+                critique_text=final_critique,
+            )
+
+            # -----------------
+            # Cache in Redis
+            # -----------------
+            if HAS_REDIS and final_summary:
+                redis_client.set(
+                    doc_hash,
+                    json.dumps(
+                        {
+                            "final_summary": final_summary,
+                            "final_judge_result": {
+                                "score": final_score,
+                                "critique_text": final_critique,
+                                "output_text": final_summary,
+                            },
+                        }
+                    ),
+                    ex=CACHE_TTL_SECONDS,
+                )
+
+        except Exception as e:
+            refund_user_quota(user_id)
+            logger.exception("Streaming failed")
+            yield json.dumps({"event": "error", "message": str(e)}) + "\n"
+
+    return Response(stream_with_context(stream()), mimetype="application/x-ndjson")

@@ -29,7 +29,13 @@ app = Flask(
     template_folder=os.path.join(script_dir, "templates"),
     static_folder=os.path.join(script_dir, "static"),
 )
-CORS(app, supports_credentials=True, origins=["http://localhost:3003"])
+CORS(
+    app,
+    supports_credentials=True,
+    origins=["http://localhost:3003", "https://ai-chatbot-83je.onrender.com"],
+    methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+)
 app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = SECRET_KEY
@@ -43,10 +49,10 @@ migrate = Migrate(app, db)
 # Load routes
 from src.core.routes import routes  # noqa: E402
 
-app.register_blueprint(routes)
+app.register_blueprint(routes, url_prefix="/api")
 
 # ----------------------
 # Run server
 # ----------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    app.run(host="0.0.0.0", port=5002, debug=True)
