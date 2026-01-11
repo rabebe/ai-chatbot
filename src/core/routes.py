@@ -2,7 +2,7 @@ import logging
 import json
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 import jwt
@@ -21,6 +21,7 @@ from extensions import db
 from src.core.agent_graph import agent_graph
 from src.core.document_processor import process_document
 from src.core.models import JudgeResult
+from src.core.email_service import send_verification_email
 from src.core.redis_client import redis_client, HAS_REDIS
 from src.core.utils import (
     decrement_and_check_quota,
@@ -74,7 +75,7 @@ def generate_content_hash(content: str) -> str:
 
 
 def now_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat() + "Z"
 
 
 # -----------------------
@@ -87,6 +88,9 @@ def login():
 
     if not user or not user.check_password(data.get("password")):
         return jsonify({"error": "Invalid credentials"}), 401
+
+    if not user.is_verified:
+        return jsonify({"error": "Email not verified. Please check your inbox."}), 403
 
     token = jwt.encode({"user_id": user.id}, SECRET_KEY, algorithm="HS256")
     resp = make_response(jsonify({"message": "Login successful"}))
@@ -115,10 +119,20 @@ def register():
 
     token = secrets.token_urlsafe(32)
     user.verification_token = token
-    user.token_expiry = datetime.utcnow() + timedelta(hours=24)
+    user.token_expiry = datetime.now(timezone.utc) + timedelta(hours=24)
 
     db.session.add(user)
     db.session.commit()
+
+    # Send verification email
+    try:
+        send_verification_email(user.email, token)
+    except Exception:
+        # Log error but don't block registration
+        logger.exception("Failed to send verification email")
+        return jsonify(
+            {"message": "User registered, but verification email failed to send"}
+        ), 201
 
     return jsonify({"message": "User registered", "verification_token": token}), 201
 
@@ -135,6 +149,20 @@ def verify_email():
     if not user:
         return jsonify({"error": "Invalid token"}), 400
 
+    # Ensure token_expiry is timezone-aware
+    expiry = user.token_expiry
+    if expiry is None:
+        return jsonify(
+            {"error": "Token expired. Please request a new verification email."}
+        ), 400
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+
+    if expiry < datetime.now(timezone.utc):
+        return jsonify(
+            {"error": "Token expired. Please request a new verification email."}
+        ), 400
+
     # Mark user as verified
     user.is_verified = True
     user.verification_token = None
@@ -142,6 +170,35 @@ def verify_email():
     db.session.commit()
 
     return jsonify({"message": "Email verified successfully"}), 200
+
+
+@routes.route("/resend-verification", methods=["POST"])
+def resend_verification():
+    data = request.get_json()
+    email = data.get("email")
+
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"error": "Email not found"}), 404
+
+    if user.is_verified:
+        return jsonify({"message": "Email already verified"}), 200
+
+    # Generate new token
+    token = secrets.token_urlsafe(32)
+    user.verification_token = token
+    user.token_expiry = datetime.now(timezone.utc) + timedelta(hours=24)
+    db.session.commit()
+
+    try:
+        send_verification_email(user.email, token)
+    except Exception as e:
+        return jsonify({"error": f"Failed to send verification email: {str(e)}"}), 500
+
+    return jsonify({"message": "Verification email resent"}), 200
 
 
 @routes.route("/logout", methods=["POST"])
