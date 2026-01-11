@@ -137,7 +137,7 @@ def register():
     return jsonify({"message": "User registered", "verification_token": token}), 201
 
 
-@routes.route("/verify-email", methods=["GET"])
+@routes.route("/verify", methods=["GET"])
 def verify_email():
     token = request.args.get("token")
 
