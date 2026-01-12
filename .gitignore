@@ -1,5 +1,7 @@
 # Virtual Environment
 venv/
+venv_prod/
+venv_test/
 .env
 
 # Python cache files
