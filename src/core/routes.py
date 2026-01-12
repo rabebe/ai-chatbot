@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+import os
 import logging
 import json
 import hashlib
@@ -33,6 +35,11 @@ from src.core.utils import (
     save_summary,
 )
 
+load_dotenv()
+
+FLASK_ENV = os.getenv("FLASK_ENV", "production")
+secure_cookie = False if FLASK_ENV == "development" else True
+
 # -----------------------
 # Logging
 # -----------------------
@@ -43,7 +50,7 @@ logger = logging.getLogger(__name__)
 # Blueprint
 # -----------------------
 routes = Blueprint("routes", __name__, url_prefix="/api")
-SECRET_KEY = "supersecret"
+SECRET_KEY = os.getenv("SECRET_KEY")
 
 
 # -----------------------
@@ -94,7 +101,9 @@ def login():
 
     token = jwt.encode({"user_id": user.id}, SECRET_KEY, algorithm="HS256")
     resp = make_response(jsonify({"message": "Login successful"}))
-    resp.set_cookie("access_token", token, httponly=True, samesite="None")
+    resp.set_cookie(
+        "access_token", token, httponly=True, samesite="None", secure=secure_cookie
+    )
     return resp
 
 
@@ -204,7 +213,14 @@ def resend_verification():
 @routes.route("/logout", methods=["POST"])
 def logout():
     resp = make_response(jsonify({"message": "Logged out"}))
-    resp.set_cookie("access_token", "", expires=0, httponly=True, samesite="None")
+    resp.set_cookie(
+        "access_token",
+        "",
+        expires=0,
+        httponly=True,
+        samesite="None",
+        secure=secure_cookie,
+    )
     return resp
 
 
