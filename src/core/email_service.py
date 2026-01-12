@@ -11,7 +11,7 @@ FROM_EMAIL = os.getenv("FROM_EMAIL")
 
 
 def send_verification_email(to_email: str, token: str):
-    verify_link = f"http://localhost:3003/verify?token={token}"
+    verify_link = f"https://summarizer-frontend-alpha.vercel.app/verify?token={token}"
 
     subject = "RefineBot Email Verification"
     body = f"""
