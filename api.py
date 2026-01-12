@@ -32,7 +32,7 @@ app = Flask(
 CORS(
     app,
     supports_credentials=True,
-    origins=["http://localhost:3003", "https://ai-chatbot-83je.onrender.com"],
+    origins=["http://localhost:3003", "https://summarizer-frontend-alpha.vercel.app"],
     methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )

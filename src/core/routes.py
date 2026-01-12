@@ -94,7 +94,7 @@ def login():
 
     token = jwt.encode({"user_id": user.id}, SECRET_KEY, algorithm="HS256")
     resp = make_response(jsonify({"message": "Login successful"}))
-    resp.set_cookie("access_token", token, httponly=True)
+    resp.set_cookie("access_token", token, httponly=True, samesite="None")
     return resp
 
 
@@ -204,7 +204,7 @@ def resend_verification():
 @routes.route("/logout", methods=["POST"])
 def logout():
     resp = make_response(jsonify({"message": "Logged out"}))
-    resp.set_cookie("access_token", "", expires=0)
+    resp.set_cookie("access_token", "", expires=0, httponly=True, samesite="None")
     return resp
 
 
