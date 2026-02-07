@@ -106,26 +106,30 @@ API-->>FE: event=final_summary
 
 ### Authentication Flow
 
+```mermaid
 flowchart TD
-U[User]
-FE[Frontend]
-API[Flask API]
-DB[(PostgreSQL)]
-EMAIL[Email Service]
+    %% Nodes
+    U[User]
+    FE[Frontend]
+    API[Flask API]
+    DB[(PostgreSQL)]
+    EMAIL[Email Service]
 
+    %% Registration Flow
     U --> FE
     FE -->|Register| API
     API --> DB
     API --> EMAIL
 
-
+    %% Verification Flow
     U -->|Verify Email| API
     API --> DB
 
-
+    %% Login Flow
     U -->|Login| API
     API --> DB
     API -->|JWT Cookie| FE
+```
 
 ## API Design
 
